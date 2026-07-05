@@ -54,5 +54,52 @@ def get_popular_places(
     return json.dumps(result, ensure_ascii=False)
 
 
+@mcp.tool()
+def classify_destination(name: str) -> str:
+    result: Dict[str, Any] = places_service.classify_destination(name=name)
+
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def recommend_cities_in_region(
+    region: str,
+    interests: Optional[List[str]] = None,
+    days: Optional[int] = None,
+    budget: Optional[str] = None,
+    travelers: Optional[int] = None,
+    travel_style: Optional[str] = None,
+    limit: int = 6,
+) -> str:
+    result: Dict[str, Any] = places_service.recommend_cities_in_region(
+        region=region,
+        interests=interests or [],
+        days=days,
+        budget=budget,
+        travelers=travelers,
+        travel_style=travel_style,
+        limit=limit,
+    )
+
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def rank_places(
+    city: str,
+    places: List[Dict[str, Any]],
+    interests: Optional[List[str]] = None,
+    days: Optional[int] = None,
+) -> str:
+    result: Dict[str, Any] = places_service.rank_places(
+        city=city,
+        places=places or [],
+        interests=interests or [],
+        days=days,
+    )
+
+    return json.dumps(result, ensure_ascii=False)
+
+
 if __name__ == "__main__":
     mcp.run(transport="streamable-http")

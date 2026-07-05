@@ -52,9 +52,7 @@ class MCPSettings:
 @dataclass
 class APISettings:
     geoapify_api_key: str = os.getenv("GEOAPIFY_API_KEY", "")
-    opentripmap_api_key: str = os.getenv("OPENTRIPMAP_API_KEY", "")
     openrouteservice_api_key: str = os.getenv("OPENROUTESERVICE_API_KEY", "")
-    google_api_key: str = os.getenv("GOOGLE_API_KEY", "")
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
 

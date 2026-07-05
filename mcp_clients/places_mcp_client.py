@@ -1,190 +1,97 @@
-import asyncio
-import json
-import threading
-from typing import Any, Dict, Optional
-
-from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from typing import Any, Dict, List, Optional
 
 from config.settings import mcp_settings
+from mcp_clients.base_mcp_client import BaseMCPClient
 from schemas.mcp_schema import MCPToolResponse
 
 
-class PlacesMCPClient:
+class PlacesMCPClient(BaseMCPClient):
     def __init__(self):
-        self.server_url = mcp_settings.places_mcp_url
+        super().__init__(
+            server_url=mcp_settings.places_mcp_url,
+            server_name="places_mcp_server",
+        )
 
     def get_popular_places(
         self,
         destination: str,
-        interests: Optional[list[str]] = None,
+        interests: Optional[List[str]] = None,
         limit: int = 10,
     ) -> MCPToolResponse:
-        arguments: Dict[str, Any] = {
-            "destination": destination,
-            "interests": interests or [],
-            "limit": limit,
-        }
-
-        return self._run_tool_sync(
+        return self.call_tool(
             tool_name="get_popular_places",
-            arguments=arguments,
+            arguments={
+                "destination": destination,
+                "interests": interests or [],
+                "limit": limit,
+            },
         )
 
     def recommend_destinations(
         self,
         source: Optional[str] = None,
-        interests: Optional[list[str]] = None,
+        interests: Optional[List[str]] = None,
         month: Optional[str] = None,
         budget: Optional[str] = None,
         days: Optional[int] = None,
         travelers: Optional[int] = None,
         limit: int = 8,
     ) -> MCPToolResponse:
-        arguments: Dict[str, Any] = {
-            "source": source,
-            "interests": interests or [],
-            "month": month,
-            "budget": budget,
-            "days": days,
-            "travelers": travelers,
-            "limit": limit,
-        }
-
-        return self._run_tool_sync(
+        return self.call_tool(
             tool_name="recommend_destinations",
-            arguments=arguments,
+            arguments={
+                "source": source,
+                "interests": interests or [],
+                "month": month,
+                "budget": budget,
+                "days": days,
+                "travelers": travelers,
+                "limit": limit,
+            },
         )
 
-    def health_check(self) -> Dict[str, Any]:
-        try:
-            tools = self._run_async(self._list_tools())
+    def classify_destination(self, name: str) -> MCPToolResponse:
+        return self.call_tool(
+            tool_name="classify_destination",
+            arguments={"name": name},
+        )
 
-            return {
-                "server_name": "places_mcp_server",
-                "server_url": self.server_url,
-                "status": "healthy",
-                "tools": tools,
-            }
-
-        except Exception as e:
-            return {
-                "server_name": "places_mcp_server",
-                "server_url": self.server_url,
-                "status": "unhealthy",
-                "error": str(e),
-            }
-
-    def _run_tool_sync(
+    def recommend_cities_in_region(
         self,
-        tool_name: str,
-        arguments: Dict[str, Any],
+        region: str,
+        interests: Optional[List[str]] = None,
+        days: Optional[int] = None,
+        budget: Optional[str] = None,
+        travelers: Optional[int] = None,
+        travel_style: Optional[str] = None,
+        limit: int = 6,
     ) -> MCPToolResponse:
-        try:
-            return self._run_async(
-                self._call_tool(
-                    tool_name=tool_name,
-                    arguments=arguments,
-                )
-            )
+        return self.call_tool(
+            tool_name="recommend_cities_in_region",
+            arguments={
+                "region": region,
+                "interests": interests or [],
+                "days": days,
+                "budget": budget,
+                "travelers": travelers,
+                "travel_style": travel_style,
+                "limit": limit,
+            },
+        )
 
-        except Exception as e:
-            return MCPToolResponse(
-                tool_name=tool_name,
-                success=False,
-                data={},
-                error=f"Streamable HTTP MCP places client failed: {str(e)}",
-                raw_response=str(e),
-            )
-
-    async def _call_tool(
+    def rank_places(
         self,
-        tool_name: str,
-        arguments: Dict[str, Any],
+        city: str,
+        places: List[Dict[str, Any]],
+        interests: Optional[List[str]] = None,
+        days: Optional[int] = None,
     ) -> MCPToolResponse:
-        async with streamablehttp_client(self.server_url) as transport:
-            read_stream, write_stream, _ = transport
-
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-
-                result = await session.call_tool(
-                    tool_name,
-                    arguments=arguments,
-                )
-
-                parsed = self._parse_tool_result(result)
-
-                success = bool(parsed.get("success", True))
-
-                return MCPToolResponse(
-                    tool_name=tool_name,
-                    success=success,
-                    data=parsed,
-                    error=parsed.get("error"),
-                    raw_response=parsed,
-                )
-
-    async def _list_tools(self) -> list[Dict[str, Any]]:
-        async with streamablehttp_client(self.server_url) as transport:
-            read_stream, write_stream, _ = transport
-
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-
-                tools_result = await session.list_tools()
-
-                tools = []
-
-                for tool in tools_result.tools:
-                    tools.append(
-                        {
-                            "name": tool.name,
-                            "description": tool.description,
-                        }
-                    )
-
-                return tools
-
-    def _parse_tool_result(self, result: Any) -> Dict[str, Any]:
-        if hasattr(result, "content") and result.content:
-            for item in result.content:
-                text = getattr(item, "text", None)
-
-                if text:
-                    try:
-                        return json.loads(text)
-                    except Exception:
-                        return {
-                            "success": True,
-                            "result": text,
-                        }
-
-        return {
-            "success": True,
-            "raw_result": str(result),
-        }
-
-    def _run_async(self, coro):
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(coro)
-
-        output = {}
-        error = {}
-
-        def runner():
-            try:
-                output["value"] = asyncio.run(coro)
-            except Exception as e:
-                error["value"] = e
-
-        thread = threading.Thread(target=runner)
-        thread.start()
-        thread.join()
-
-        if "value" in error:
-            raise error["value"]
-
-        return output.get("value")
+        return self.call_tool(
+            tool_name="rank_places",
+            arguments={
+                "city": city,
+                "places": places or [],
+                "interests": interests or [],
+                "days": days,
+            },
+        )

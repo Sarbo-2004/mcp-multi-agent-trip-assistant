@@ -1,15 +1,23 @@
 import html
 import json
-from dataclasses import asdict
 from typing import Any, Dict, List
 
 import google.generativeai as genai
 
 from config.settings import api_settings
-from schemas.trip_schema import TripContext
+from schemas.trip_schema import TripState
 
 
 class FinalResponseComposer:
+    """Turns a finished ``TripState`` into the user-facing plan.
+
+    By the time this runs, destination hierarchy has already been resolved
+    structurally by the graph (region -> city recommendations -> user
+    selection happens before ``compose`` is ever reached), so this composer
+    always writes a concrete, city-grouped itinerary rather than branching on
+    destination scope.
+    """
+
     def __init__(self):
         self.model = None
 
@@ -17,7 +25,7 @@ class FinalResponseComposer:
             genai.configure(api_key=api_settings.gemini_api_key)
             self.model = genai.GenerativeModel(api_settings.gemini_model)
 
-    def compose(self, context: TripContext) -> Dict[str, Any]:
+    def compose(self, state: TripState) -> Dict[str, Any]:
         if not self.model:
             return {
                 "success": False,
@@ -25,7 +33,7 @@ class FinalResponseComposer:
                 "response": None,
             }
 
-        payload = self._build_payload(context)
+        payload = self._build_payload(state)
         compact_payload = self._compact_payload(payload)
         prompt = self._build_prompt(compact_payload)
 
@@ -63,121 +71,69 @@ class FinalResponseComposer:
                 "input_payload": compact_payload,
             }
 
-    def _build_payload(self, context: TripContext) -> Dict[str, Any]:
+    def _build_payload(self, state: TripState) -> Dict[str, Any]:
         return {
-            "request": asdict(context.request),
-            "required_agents": context.required_agents,
-            "agent_results": {
-                agent_name: asdict(result)
-                for agent_name, result in context.agent_results.items()
-            },
-            "errors": context.errors,
+            "request": state.get("request", {}),
+            "selected_cities": state.get("selected_cities", []),
+            "city_attractions": state.get("city_attractions", {}),
+            "agent_results": state.get("agent_results", {}),
+            "travel_sequence": state.get("travel_sequence"),
+            "feasible": state.get("feasible"),
+            "replan_directives": state.get("replan_directives", []),
+            "errors": state.get("errors", []),
         }
 
     def _compact_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         request = payload.get("request", {})
         agent_results = payload.get("agent_results", {})
+        city_attractions = payload.get("city_attractions", {})
 
-        destination_result = self._safe_get(
-            agent_results,
-            ["destination_agent", "data"],
-        )
+        compact_cities = {}
 
-        climate_result = self._safe_get(
-            agent_results,
-            ["climate_agent", "data", "raw_climate_data"],
-        )
+        for city, data in city_attractions.items():
+            places = (data or {}).get("ranked_places") or (data or {}).get("places") or []
+            filtered = self._filter_high_quality_places(places)
 
-        transport_result = self._safe_get(
-            agent_results,
-            ["transport_agent", "data", "raw_transport_data"],
-        )
+            compact_cities[city] = {
+                "places_available": len(filtered) > 0,
+                "poi_quality": "usable" if len(filtered) >= 3 else "weak",
+                "places": filtered[:8],
+            }
 
-        hotel_result = self._safe_get(
-            agent_results,
-            ["hotel_agent", "data", "raw_hotel_data"],
-        )
+        climate_by_city = self._safe_get(agent_results, ["climate_agent", "data", "by_city"]) or {}
+        hotel_by_city = self._safe_get(agent_results, ["hotel_agent", "data", "by_city"]) or {}
+        itinerary_result = self._safe_get(agent_results, ["itinerary_agent", "data"]) or {}
+        budget_result = self._safe_get(agent_results, ["budget_agent", "data"]) or {}
 
-        itinerary_result = self._safe_get(
-            agent_results,
-            ["itinerary_agent", "data"],
-        )
+        compact_climate = {
+            city: self._safe_get(result, ["data", "raw_climate_data"])
+            for city, result in climate_by_city.items()
+        }
 
-        budget_result = self._safe_get(
-            agent_results,
-            ["budget_agent", "data"],
-        )
-
-        compact_destination = self._compact_destination_result(destination_result)
+        compact_hotel = {
+            city: self._safe_get(result, ["data", "raw_hotel_data"])
+            for city, result in hotel_by_city.items()
+        }
 
         return {
             "request": request,
-            "turn_type": request.get("turn_type"),
-            "destination_scope": request.get("destination_scope", "unknown"),
-            "destination_result": compact_destination,
-            "climate_result": climate_result,
-            "transport_result": transport_result,
-            "hotel_result": hotel_result,
-            "itinerary_result": itinerary_result,
+            "selected_cities": payload.get("selected_cities", []),
+            "city_attractions": compact_cities,
+            "climate_by_city": compact_climate,
+            "hotel_by_city": compact_hotel,
+            "travel_sequence": payload.get("travel_sequence"),
+            "itinerary_skeleton": itinerary_result,
             "budget_result": budget_result,
+            "feasible": payload.get("feasible"),
+            "replan_directives": payload.get("replan_directives", []),
             "errors": payload.get("errors", []),
+            "composer_instruction": (
+                "Use named POIs for a city only if that city's poi_quality is usable. "
+                "If poi_quality is weak for a city, describe that city's day(s) at a high level "
+                "using destination, interests, climate, transport, hotel, and budget context instead "
+                "of inventing place names."
+            ),
         }
-
-    def _compact_destination_result(self, destination_result: Dict[str, Any]) -> Dict[str, Any]:
-        if not destination_result:
-            return {}
-
-        mode = destination_result.get("mode")
-
-        if mode == "destination_recommendation":
-            recommendations_data = destination_result.get("recommended_destinations", {})
-            recommendations = recommendations_data.get("recommendations", [])
-
-            compact_recommendations = []
-
-            for item in recommendations[:8]:
-                compact_recommendations.append(
-                    {
-                        "destination": self._clean_text(item.get("destination")),
-                        "state_or_region": self._clean_text(item.get("state_or_region")),
-                        "match_score": item.get("match_score"),
-                        "best_for": item.get("best_for"),
-                        "reason": self._clean_text(item.get("reason")),
-                        "ideal_days": self._clean_text(item.get("ideal_days")),
-                        "budget_fit": self._clean_text(item.get("budget_fit")),
-                        "travel_note": self._clean_text(item.get("travel_note")),
-                    }
-                )
-
-            return {
-                "mode": mode,
-                "source": destination_result.get("source"),
-                "interests": destination_result.get("interests"),
-                "recommendations": compact_recommendations,
-            }
-
-        if mode == "places_lookup":
-            places_data = destination_result.get("places", {})
-            places = places_data.get("places", [])
-
-            filtered_places = self._filter_high_quality_places(places)
-
-            return {
-                "mode": mode,
-                "destination": destination_result.get("destination"),
-                "interests": destination_result.get("interests"),
-                "places_available": len(filtered_places) > 0,
-                "poi_quality": "usable" if len(filtered_places) >= 3 else "weak",
-                "places": filtered_places[:8],
-                "raw_place_count": len(places),
-                "filtered_place_count": len(filtered_places),
-                "composer_instruction": (
-                    "Use named POIs only if poi_quality is usable. "
-                    "If poi_quality is weak, generate a high-level itinerary using destination, interests, climate, transport, hotel, and budget context."
-                ),
-            }
-
-        return destination_result
 
     def _filter_high_quality_places(self, places: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not places:
@@ -284,68 +240,48 @@ class FinalResponseComposer:
         return f"""
 You are a professional AI trip planning assistant.
 
-Your job is to compose the final user-facing travel response using structured outputs from multiple agents.
+Your job is to compose the final user-facing travel response using structured outputs from multiple agents, covering one or more cities.
 
 Architecture rule:
 - Agents provide raw facts.
 - You generate final reasoning, advice, and itinerary.
 - Do not expose internal JSON or agent names.
 
-Critical destination-scope rules:
-1. If destination_scope is "state_or_region", do NOT create a day-wise itinerary.
-2. If destination_scope is "state_or_region", explain that the destination is broad and must be narrowed to a city, town, or route.
-3. If destination_scope is "state_or_region", recommend specific city/circuit options using available destination recommendations if present.
-4. If destination_scope is "state_or_region", ask the user to choose one option before climate, transport, hotel, or itinerary planning.
-5. If destination_scope is "state_or_region", do not say "Day 1", "Day 2", or create a detailed itinerary.
-
 General rules:
-1. Do not invent exact transport numbers. Use transport data only if present.
-2. Do not invent exact hotel names if hotel POIs are missing.
+1. Do not invent exact transport numbers. Use travel_sequence data only if present.
+2. Do not invent exact hotel names if hotel POIs are missing for a city.
 3. Do not blindly use restaurant, cafe, hotel, bank, street, statue, office, or random local POI names as main attractions.
-4. If destination places have poi_quality = "weak", do not mention those POI names.
-5. If POIs are weak, create a high-level itinerary based on:
-   - destination
+4. For any city where poi_quality is "weak", do not mention that city's POI names.
+5. Where POIs are weak, create a high-level plan for that city's days based on:
+   - the city itself
    - user interests
-   - climate data
-   - transport data
+   - that city's climate data
+   - transport/travel data
    - hotel stay signals
    - budget estimate
-6. Use raw climate data to generate practical climate-aware advice.
-7. Use raw transport data to explain route distance and travel duration.
-8. Use hotel data only as accommodation guidance. If hotel POIs are missing, suggest checking booking platforms.
+6. Use raw climate data (per city) to generate practical climate-aware advice.
+7. Use travel_sequence to describe the order attractions and cities should be visited in, and inter-city legs (distance/duration) where present.
+8. Use hotel data (per city) only as accommodation guidance. If hotel POIs are missing for a city, suggest checking booking platforms for that city.
 9. Budget estimate is rough. Make that clear.
-10. Do not output HTML entities like &amp;.
-11. Keep the response concise, polished, and useful.
-12. If the itinerary cannot rely on strong POIs, use safe labels like beaches, old town/heritage areas, cafes, markets, viewpoints, nature spots, and relaxed local exploration without naming unsupported places.
+10. If "feasible" is false, include a short, honest note that the requested days may be tight for the chosen cities, referencing replan_directives if present, without being alarmist.
+11. Do not output HTML entities like &amp;.
+12. Keep the response concise, polished, and useful.
+13. Group the itinerary by city, in the order given by travel_sequence/selected_cities, with day numbers continuing across cities (do not restart at Day 1 for each city).
 
 Structured planning context:
 {json.dumps(payload, indent=2, ensure_ascii=False)}
 
-Output format:
-
-If destination_scope is "state_or_region", return Markdown using this format:
-
-## Trip Summary
-
-## Why We Need to Narrow the Destination
-
-## Recommended City or Route Options
-
-## Budget Snapshot
-
-## Next Step
-
-If destination_scope is NOT "state_or_region", return Markdown using this format:
+Output format (Markdown):
 
 ## Trip Summary
 
 ## Climate-Aware Advice
 
-## Travel / Transport
+## Travel Sequence
 
 ## Stay Suggestions
 
-## Day-Wise Itinerary
+## Day-Wise Itinerary (grouped by city)
 
 ## Budget Snapshot
 

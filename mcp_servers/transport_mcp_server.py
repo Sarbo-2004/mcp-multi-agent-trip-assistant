@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
 
@@ -26,6 +26,19 @@ def get_transport_options(
         source=source,
         destination=destination,
         mode=mode,
+    )
+
+    return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+def optimize_route(
+    points: List[Dict[str, Any]],
+    start_index: int = 0,
+) -> str:
+    result: Dict[str, Any] = transport_service.optimize_route(
+        points=points or [],
+        start_index=start_index,
     )
 
     return json.dumps(result, ensure_ascii=False)

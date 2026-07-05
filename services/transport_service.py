@@ -265,6 +265,86 @@ class TransportService:
             ),
         }
 
+    def optimize_route(
+        self,
+        points: list,
+        start_index: int = 0,
+    ) -> Dict[str, Any]:
+        """Order a list of points (attractions in a city, or cities in a trip)
+        into a short visiting sequence using nearest-neighbour on straight-line
+        distance. Deterministic, needs no external API.
+
+        Each point must be a dict containing at least ``name``, ``latitude``
+        and ``longitude``. Points missing coordinates are dropped.
+        """
+        usable_points = [
+            point
+            for point in points
+            if isinstance(point, dict)
+            and point.get("latitude") is not None
+            and point.get("longitude") is not None
+        ]
+
+        if not usable_points:
+            return {
+                "success": False,
+                "error": "No points with usable coordinates were provided.",
+                "ordered_points": [],
+                "legs": [],
+                "total_distance_km": 0.0,
+            }
+
+        start_index = start_index if 0 <= start_index < len(usable_points) else 0
+
+        remaining = list(usable_points)
+        current = remaining.pop(start_index)
+        ordered = [current]
+
+        while remaining:
+            nearest_index = min(
+                range(len(remaining)),
+                key=lambda i: self._haversine_distance_km(
+                    current.get("latitude"),
+                    current.get("longitude"),
+                    remaining[i].get("latitude"),
+                    remaining[i].get("longitude"),
+                ),
+            )
+
+            current = remaining.pop(nearest_index)
+            ordered.append(current)
+
+        legs = []
+        total_distance_km = 0.0
+
+        for previous_point, next_point in zip(ordered, ordered[1:]):
+            distance_km = round(
+                self._haversine_distance_km(
+                    previous_point.get("latitude"),
+                    previous_point.get("longitude"),
+                    next_point.get("latitude"),
+                    next_point.get("longitude"),
+                ),
+                2,
+            )
+
+            legs.append(
+                {
+                    "from": previous_point.get("name"),
+                    "to": next_point.get("name"),
+                    "distance_km": distance_km,
+                }
+            )
+
+            total_distance_km += distance_km
+
+        return {
+            "success": True,
+            "ordered_points": ordered,
+            "legs": legs,
+            "total_distance_km": round(total_distance_km, 2),
+        }
+
     def _haversine_distance_km(
         self,
         lat1: Optional[float],

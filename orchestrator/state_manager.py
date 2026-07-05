@@ -1,60 +1,47 @@
-from dataclasses import asdict
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
-from schemas.trip_schema import TripContext, TripRequest
+from schemas.trip_schema import TripRequest
 
 
 class StateManager:
+    """Detects cross-turn changes between a previous, completed trip request
+    and a newly parsed one, and merges them into a single request for the
+    planner to act on.
+
+    This is turn-to-turn continuity (e.g. "actually make it 5 days instead")
+    across separate planning runs — distinct from same-run automatic
+    replanning, which ``PlannerAgent.apply_replan_directive`` handles when
+    ``BudgetAgent`` reports infeasibility mid-plan.
+    """
+
+    COMPARABLE_FIELDS = [
+        "source",
+        "destination",
+        "month",
+        "days",
+        "budget",
+        "travelers",
+        "travel_dates",
+    ]
+
     def is_replan_candidate(
         self,
         current_request: TripRequest,
-        previous_context: Optional[TripContext],
+        previous_request: Optional[TripRequest],
     ) -> bool:
-        if not previous_context:
-            return False
-
-        previous_request = previous_context.request
-
         if not previous_request:
             return False
 
-        if current_request.parser_used == "context_continuation":
-            return False
-
-        changed_fields = self.detect_modified_fields(
-            previous_request=previous_request,
-            current_request=current_request,
-        )
-
-        if not changed_fields:
-            return False
-
-        if current_request.destination and current_request.destination != previous_request.destination:
-            return True
-
-        if previous_request.destination and not current_request.destination:
-            return True
-
-        return True
+        return bool(self.detect_modified_fields(previous_request, current_request))
 
     def detect_modified_fields(
         self,
         previous_request: TripRequest,
         current_request: TripRequest,
-    ) -> List:
+    ) -> List[str]:
         modified_fields = []
 
-        comparable_fields = [
-            "source",
-            "destination",
-            "month",
-            "days",
-            "budget",
-            "travelers",
-            "travel_dates",
-        ]
-
-        for field_name in comparable_fields:
+        for field_name in self.COMPARABLE_FIELDS:
             current_value = getattr(current_request, field_name)
             previous_value = getattr(previous_request, field_name)
 
@@ -72,17 +59,12 @@ class StateManager:
 
     def merge_replan_request(
         self,
-        previous_context: TripContext,
+        previous_request: TripRequest,
         current_request: TripRequest,
     ) -> TripRequest:
-        previous_request = previous_context.request
+        modified_fields = self.detect_modified_fields(previous_request, current_request)
 
-        modified_fields = self.detect_modified_fields(
-            previous_request=previous_request,
-            current_request=current_request,
-        )
-
-        merged_request = TripRequest(
+        return TripRequest(
             user_query=current_request.user_query,
             source=current_request.source or previous_request.source,
             destination=current_request.destination or previous_request.destination,
@@ -96,99 +78,11 @@ class StateManager:
             missing_fields=[],
             confidence=max(current_request.confidence, previous_request.confidence),
             parser_used=f"replan_from_{current_request.parser_used}",
-            turn_type="replan",
+            turn_type="continuation",
             modified_fields=modified_fields,
+            destination_scope=(
+                current_request.destination_scope
+                if "destination" in modified_fields
+                else previous_request.destination_scope
+            ),
         )
-
-        return merged_request
-
-    def needs_clarification(
-        self,
-        request: TripRequest,
-        previous_context: Optional[TripContext] = None,
-    ) -> bool:
-        if previous_context:
-            return False
-
-        has_any_trip_signal = any(
-            [
-                request.source,
-                request.destination,
-                request.month,
-                request.days,
-                request.budget,
-                request.travelers,
-                request.interests,
-            ]
-        )
-
-        if not has_any_trip_signal:
-            return True
-
-        if not request.destination and not request.interests:
-            return True
-
-        return False
-
-    def build_clarification_questions(
-        self,
-        request: TripRequest,
-    ) -> List:
-        questions = []
-
-        if not request.source:
-            questions.append("Where will you be starting from?")
-
-        if not request.destination and not request.interests:
-            questions.append(
-                "Do you already have a destination in mind, or should I recommend places based on your preferences?"
-            )
-
-        if not request.days:
-            questions.append("How many days are you planning for?")
-
-        if not request.month and not request.travel_dates:
-            questions.append("Which month or travel period are you considering?")
-
-        if not request.budget:
-            questions.append("What budget range do you prefer: low, medium, or high?")
-
-        return questions[:4]
-
-    def build_clarification_response(
-        self,
-        request: TripRequest,
-    ) -> Dict[str, Any]:
-        questions = self.build_clarification_questions(request)
-
-        return {
-            "success": False,
-            "status": "needs_clarification",
-            "response": self._format_clarification_message(questions),
-            "error": None,
-            "request": asdict(request),
-            "workflow": {
-                "required_agents": [],
-                "completed_agents": [],
-                "failed_agents": [],
-            },
-            "summary": {
-                "selected_destination": request.destination,
-                "has_destination_recommendations": False,
-                "destination_recommendations": [],
-                "final_plan_summary": "More information is needed before planning can continue.",
-                "errors": [],
-            },
-            "clarification_questions": questions,
-        }
-
-    def _format_clarification_message(self, questions: List[str]) -> str:
-        if not questions:
-            return "I need a little more information before planning this trip."
-
-        lines = ["I can plan this, but I need a few details first:"]
-
-        for index, question in enumerate(questions, start=1):
-            lines.append(f"{index}. {question}")
-
-        return "\n".join(lines)

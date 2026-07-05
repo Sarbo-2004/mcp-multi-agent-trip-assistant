@@ -12,6 +12,10 @@ from config.constants import (
     AGENT_HOTEL,
     AGENT_ITINERARY,
     AGENT_BUDGET,
+    AGENT_ORDER,
+    SCOPE_CITY,
+    SCOPE_REGION,
+    SCOPE_UNKNOWN,
 )
 from schemas.trip_schema import TripRequest
 
@@ -30,7 +34,7 @@ class IntentAnalyzer:
 
         if api_settings.gemini_api_key:
             genai.configure(api_key=api_settings.gemini_api_key)
-            self.model = genai.GenerativeModel("gemini-2.5-flash")
+            self.model = genai.GenerativeModel(api_settings.gemini_model)
 
     def analyze(self, user_query: str) -> TripRequest:
         spacy_request = self._analyze_with_spacy(user_query)
@@ -373,6 +377,11 @@ class IntentAnalyzer:
             json_text = self._extract_json(text)
             data = json.loads(json_text)
 
+            destination_scope = data.get("destination_scope") or SCOPE_UNKNOWN
+
+            if destination_scope not in {SCOPE_CITY, SCOPE_REGION, SCOPE_UNKNOWN}:
+                destination_scope = SCOPE_UNKNOWN
+
             request = TripRequest(
                 user_query=user_query,
                 source=data.get("source"),
@@ -387,6 +396,7 @@ class IntentAnalyzer:
                 missing_fields=data.get("missing_fields") or [],
                 confidence=float(data.get("confidence", 0.85)),
                 parser_used="gemini",
+                destination_scope=destination_scope,
             )
 
             request.suggested_agents = self._validate_agents(
@@ -461,10 +471,11 @@ Important interpretation rules:
     beach, nature, food, nightlife, heritage, religious, adventure, shopping, relaxation, romantic
 20. If a field cannot be inferred confidently, use null.
 21. confidence should reflect the final extracted intent, between 0 and 1.
-If destination is a broad state/region like Rajasthan, Kerala, Himachal, Odisha, South India, North East, set destination_scope = "state_or_region".
+destination_scope is only a rough hint — the destination agent will classify it precisely.
+If destination is a broad state/region/country like Rajasthan, Kerala, Himachal, Odisha, South India, North East, India, set destination_scope = "region".
 If destination is a specific city/town like Jaipur, Ooty, Goa, Munnar, Udaipur, set destination_scope = "city".
 If no destination is provided, set destination_scope = "unknown".
-If destination_scope is "state_or_region", do not include climate_agent, transport_agent, hotel_agent, or itinerary_agent yet. Include destination_agent and budget_agent only.
+If destination_scope is "region", do not include transport_agent, hotel_agent, or itinerary_agent yet — cities must be chosen first. Include destination_agent and budget_agent.
 
 Example 1:
 User: We are 3 friends looking for a relaxing but fun long weekend getaway from Pune sometime around New Year, preferably near the coast, with good food, some nightlife, and not too costly.
@@ -480,7 +491,8 @@ Output:
   "travel_dates": null,
   "required_agents": ["destination_agent", "climate_agent", "hotel_agent", "itinerary_agent", "budget_agent"],
   "missing_fields": ["destination"],
-  "confidence": 0.85
+  "confidence": 0.85,
+  "destination_scope": "unknown"
 }}
 
 Example 2:
@@ -497,7 +509,8 @@ Output:
   "travel_dates": null,
   "required_agents": ["destination_agent", "climate_agent", "hotel_agent", "itinerary_agent", "budget_agent"],
   "missing_fields": ["destination", "month"],
-  "confidence": 0.85
+  "confidence": 0.85,
+  "destination_scope": "unknown"
 }}
 
 Now analyze this user query:
@@ -518,7 +531,8 @@ Return JSON exactly in this structure:
   "travel_dates": null,
   "required_agents": [],
   "missing_fields": [],
-  "confidence": 0.0
+  "confidence": 0.0,
+  "destination_scope": "unknown"
 }}
 """
 
@@ -542,8 +556,9 @@ Return JSON exactly in this structure:
     def _infer_agents(self, request: TripRequest) -> List:
         agents = []
 
-        if request.destination or not request.destination:
-            agents.append(AGENT_DESTINATION)
+        # Destination agent always runs: it either recommends destinations
+        # (when none is given) or fetches attractions for the chosen one.
+        agents.append(AGENT_DESTINATION)
 
         if request.month:
             agents.append(AGENT_CLIMATE)
@@ -563,21 +578,8 @@ Return JSON exactly in this structure:
         return self._validate_agents(agents, request)
 
     def _validate_agents(self, agents: List[str], request: TripRequest) -> List:
-        preferred_order = [
-            AGENT_DESTINATION,
-            AGENT_CLIMATE,
-            AGENT_TRANSPORT,
-            AGENT_HOTEL,
-            AGENT_ITINERARY,
-            AGENT_BUDGET,
-        ]
-
-        valid_agents = set(preferred_order)
-        ordered = []
-
-        for agent in preferred_order:
-            if agent in agents and agent in valid_agents and agent not in ordered:
-                ordered.append(agent)
+        requested = set(agents)
+        ordered = [agent for agent in AGENT_ORDER if agent in requested]
 
         if AGENT_TRANSPORT in ordered:
             if not request.source or not request.destination:

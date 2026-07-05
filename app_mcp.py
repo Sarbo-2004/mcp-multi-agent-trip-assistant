@@ -24,6 +24,29 @@ def init_state():
         st.session_state.pending_prompt = None
 
 
+def _clarification_summary_text(clarification: dict) -> str:
+    reason = clarification.get("reason") or "I need a bit more information to continue."
+    questions = clarification.get("questions") or []
+    lines = [reason]
+
+    for question in questions:
+        lines.append(f"- {question.get('question')}")
+
+    return "\n".join(lines)
+
+
+def _record_result(user_facing_content: str, result: dict):
+    st.session_state.last_result = result
+
+    st.session_state.messages.append(
+        {
+            "role": "assistant",
+            "content": user_facing_content,
+            "result": result,
+        }
+    )
+
+
 def run_query(user_query: str):
     st.session_state.messages.append(
         {
@@ -33,54 +56,81 @@ def run_query(user_query: str):
     )
 
     with st.spinner("Planning your trip..."):
-        result = st.session_state.orchestrator.run(
-            user_query=user_query,
-            debug=False,
-        )
+        result = st.session_state.orchestrator.run(user_query=user_query, debug=False)
 
-    st.session_state.last_result = result
+    if result.get("awaiting_clarification"):
+        content = _clarification_summary_text(result.get("clarification") or {})
+    else:
+        content = result.get("response") or result.get("error") or "I could not generate a final response."
 
-    response = result.get("response")
-
-    if not response:
-        response = result.get("error") or "I could not generate a final response."
-
-    st.session_state.messages.append(
-        {
-            "role": "assistant",
-            "content": response,
-            "result": result,
-        }
-    )
+    _record_result(content, result)
 
 
-def render_recommendation_buttons(result):
-    summary = result.get("summary", {})
-    recommendations = summary.get("destination_recommendations", [])
+def run_answer(answers: dict):
+    with st.spinner("Continuing..."):
+        result = st.session_state.orchestrator.run(answer=answers, debug=False)
 
-    if not recommendations:
+    if result.get("awaiting_clarification"):
+        content = _clarification_summary_text(result.get("clarification") or {})
+    else:
+        content = result.get("response") or result.get("error") or "I could not generate a final response."
+
+    _record_result(content, result)
+
+
+def _render_question_input(question: dict):
+    kind = question.get("kind", "free_text")
+    options = question.get("options") or []
+    widget_key = f"clarify_{question.get('id')}"
+    label = question.get("question") or "Please provide more detail"
+
+    if kind == "single_select" and options:
+        labels = [option.get("label") for option in options]
+        ids = [option.get("id") for option in options]
+        choice = st.radio(label, labels, key=widget_key)
+        return ids[labels.index(choice)] if choice in labels else None
+
+    if kind == "multi_select" and options:
+        labels = [option.get("label") for option in options]
+        ids = [option.get("id") for option in options]
+        chosen = st.multiselect(label, labels, key=widget_key)
+        return [ids[labels.index(item)] for item in chosen]
+
+    return st.text_input(label, key=widget_key)
+
+
+def render_pending_clarification():
+    """Generic form for whatever the planner is currently asking.
+
+    Renders every ``kind`` (free_text / single_select / multi_select) the
+    same way regardless of which clarification rule produced it, so new
+    clarification cases never require UI changes.
+    """
+    last_result = st.session_state.last_result
+
+    if not last_result or not last_result.get("awaiting_clarification"):
         return
 
-    st.markdown("#### Choose a destination to continue")
+    clarification = last_result.get("clarification") or {}
+    questions = clarification.get("questions") or []
 
-    cols = st.columns(2)
+    if not questions:
+        return
 
-    for index, item in enumerate(recommendations):
-        destination = item.get("destination")
-        score = item.get("match_score")
+    st.markdown(f"##### {clarification.get('reason', 'A quick question')}")
 
-        if not destination:
-            continue
+    with st.form(key=f"clarification_form_{len(st.session_state.messages)}"):
+        answers = {}
 
-        label = destination
+        for question in questions:
+            question_id = question.get("id")
+            answers[question_id] = _render_question_input(question)
 
-        if score:
-            label = f"{destination} · {score}% match"
+        submitted = st.form_submit_button("Submit")
 
-        with cols[index % 2]:
-            if st.button(label, key=f"destination_{index}_{destination}"):
-                st.session_state.pending_prompt = f"Continue with {destination}"
-                st.rerun()
+    if submitted:
+        run_answer(answers)
+        st.rerun()
 
 
 def render_sidebar():
@@ -90,14 +140,13 @@ def render_sidebar():
         st.markdown(
             """
             **System Flow**
-            
-            - Intent Analyzer  
-            - Dynamic Workflow Planner  
-            - Places MCP  
-            - Climate MCP  
-            - Transport MCP  
-            - Hotel MCP  
-            - Final Composer  
+
+            - Intent Analyzer
+            - Planner Agent (routes every step)
+            - Clarification / City Selection
+            - Destination · Climate · Transport · Hotel · Itinerary · Budget MCP agents
+            - Replanning (feasibility gate)
+            - Final Composer
             """
         )
 
@@ -123,20 +172,16 @@ def render_chat():
         with st.chat_message(role):
             st.markdown(content)
 
-            if role == "assistant":
-                result = message.get("result")
-                if result:
-                    render_recommendation_buttons(result)
-
 
 def main():
     init_state()
     render_sidebar()
 
     st.title("🧭 Dynamic MCP Trip Planner")
-    st.caption("Plan trips using dynamic multi-agent orchestration with MCP tools.")
+    st.caption("Plan trips using planner-led multi-agent orchestration with MCP tools.")
 
     render_chat()
+    render_pending_clarification()
 
     if st.session_state.pending_prompt:
         prompt = st.session_state.pending_prompt
@@ -144,7 +189,17 @@ def main():
         run_query(prompt)
         st.rerun()
 
-    user_query = st.chat_input("Tell me what kind of trip you want...")
+    awaiting_clarification = bool(
+        st.session_state.last_result and st.session_state.last_result.get("awaiting_clarification")
+    )
+
+    placeholder = (
+        "Or type your answer here instead of using the form above..."
+        if awaiting_clarification
+        else "Tell me what kind of trip you want..."
+    )
+
+    user_query = st.chat_input(placeholder)
 
     if user_query:
         run_query(user_query)

@@ -1,0 +1,21 @@
+# Web UI
+streamlit>=1.56
+
+# Orchestration graph — planner-led routing, interrupt/resume for clarification
+langgraph>=1.1
+
+# MCP protocol (servers + streamable-http clients)
+mcp>=1.26
+
+# LLM used for intent analysis, destination generation and final composition
+google-generativeai>=0.8
+
+# NLP entity extraction in the intent analyzer
+spacy>=3.8
+# Also run once after install:  python -m spacy download en_core_web_sm
+
+# HTTP calls to Geoapify / Open-Meteo / OpenRouteService in the services layer
+requests>=2.32
+
+# Loads API keys from .env
+python-dotenv>=1.0
