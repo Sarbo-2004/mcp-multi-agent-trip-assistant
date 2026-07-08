@@ -9,7 +9,7 @@ class HotelService:
     def __init__(self):
         self.geoapify_api_key = api_settings.geoapify_api_key
         self.timeout = network_settings.request_timeout
-        self.ssl_verify = network_settings.ssl_verify
+        self.ssl_verify = network_settings.geoapify_ssl_verify
 
         self.geoapify_geocode_url = "https://api.geoapify.com/v1/geocode/search"
         self.geoapify_places_url = "https://api.geoapify.com/v2/places"

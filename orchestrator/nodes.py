@@ -1,5 +1,5 @@
-from dataclasses import asdict
-from typing import Any, Dict, List
+from dataclasses import asdict, fields
+from typing import Any, Dict
 
 from langgraph.types import interrupt
 
@@ -28,10 +28,6 @@ from agents_mcp.itinerary_agent import ItineraryAgent
 from agents_mcp.budget_agent import BudgetAgent
 
 
-# Shared singletons. LangGraph nodes are plain functions, so the stateful
-# collaborators they need (the planner brain, agent instances, the intent
-# parser, the composer) live at module scope and are imported by
-# ``trip_graph.py`` to wire the graph.
 intent_analyzer = IntentAnalyzer()
 planner_agent = PlannerAgent()
 final_response_composer = FinalResponseComposer()
@@ -57,11 +53,36 @@ def _record_result(state: TripState, agent_name: str, result: AgentOutput) -> No
         state["errors"] = errors
 
 
+def _sanitize_request_dict(request_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Remove fields not accepted by TripRequest.
+
+    This prevents Redis memory keys or future extra fields from breaking:
+    TripRequest(**request_dict)
+    """
+
+    allowed_fields = {field.name for field in fields(TripRequest)}
+
+    return {
+        key: value
+        for key, value in (request_dict or {}).items()
+        if key in allowed_fields
+    }
+
+
 def _request_from_state(state: TripState) -> TripRequest:
-    return TripRequest(**state["request"])
+    request_dict = dict(state.get("request") or {})
+    sanitized_request = _sanitize_request_dict(request_dict)
+    state["request"] = sanitized_request
+
+    return TripRequest(**sanitized_request)
 
 
-def _base_agent_input(request: TripRequest, destination: Any = None, context: Dict[str, Any] = None) -> AgentInput:
+def _base_agent_input(
+    request: TripRequest,
+    destination: Any = None,
+    context: Dict[str, Any] = None,
+) -> AgentInput:
     return AgentInput(
         query=request.user_query,
         source=request.source,
@@ -76,36 +97,50 @@ def _base_agent_input(request: TripRequest, destination: Any = None, context: Di
 
 
 # ---------------------------------------------------------------------- #
-# Intake — parses the raw query into a TripRequest exactly once per thread.
-# If the facade has already seeded ``state["request"]`` (e.g. a merged
-# continuation request), intake leaves it untouched.
+# Intake
 # ---------------------------------------------------------------------- #
 
 def intake_node(state: TripState) -> TripState:
-    # ``intake`` only ever runs once, at the start of a brand-new graph
-    # invocation (never on resume, since ``Command(resume=...)`` continues
-    # execution from inside the paused node, not from the entry point). The
-    # facade may pre-seed ``request`` itself (e.g. a merged continuation
-    # request); when it hasn't, parse the raw query here.
+    """
+    Parse raw query only when request was not already seeded by TripOrchestrator.
+
+    Important for Redis memory:
+    - TripOrchestrator loads Redis memory.
+    - TripOrchestrator merges memory into request.
+    - This node must not overwrite state["request"] when it already exists.
+    """
+
     if not state.get("request"):
-        state["request"] = asdict(intent_analyzer.analyze(state.get("raw_user_query", "")))
+        parsed_request = asdict(
+            intent_analyzer.analyze(state.get("raw_user_query", ""))
+        )
+        state["request"] = _sanitize_request_dict(parsed_request)
+    else:
+        state["request"] = _sanitize_request_dict(state.get("request") or {})
+
+    state["trip_memory"] = state.get("trip_memory") or {}
+    state["conversation_history"] = state.get("conversation_history") or []
 
     state["agent_results"] = {}
     state["errors"] = []
-    state["conversation_history"] = state.get("conversation_history") or []
+
     state["phase"] = PHASE_INTAKE
     state["pending_clarification"] = None
     state["clarification_answers"] = {}
     state["asked_clarifications"] = []
     state["planned_agents"] = []
+
     state["destination_resolved"] = False
     state["selected_cities"] = []
     state["city_recommendations"] = []
     state["city_attractions"] = {}
+
     state["travel_sequence"] = None
     state["feasible"] = None
+
     state["replan_count"] = 0
     state["replan_directives"] = []
+
     state["final_response"] = None
     state["done"] = False
 
@@ -113,7 +148,7 @@ def intake_node(state: TripState) -> TripState:
 
 
 # ---------------------------------------------------------------------- #
-# Planner hub — the only node that decides where to go next.
+# Planner
 # ---------------------------------------------------------------------- #
 
 def planner_node(state: TripState) -> TripState:
@@ -125,11 +160,7 @@ def planner_node(state: TripState) -> TripState:
 
 
 # ---------------------------------------------------------------------- #
-# Clarification — generic, rule-driven. Re-derives the same question
-# deterministically before and after the interrupt (validated LangGraph
-# pattern: the node re-runs from the top on resume, so recomputation before
-# ``interrupt()`` is harmless and avoids reconstructing dataclasses from a
-# checkpointed dict).
+# Clarification
 # ---------------------------------------------------------------------- #
 
 def clarify_node(state: TripState) -> TripState:
@@ -158,37 +189,47 @@ def city_selection_node(state: TripState) -> TripState:
 
 
 def _reparse_request_after_clarification(state: TripState) -> None:
-    """Free-text clarification answers (e.g. the ambiguous-request rule)
-    only append raw text to the query. Re-run the intent parser on the
-    combined text so structured fields (destination, days, ...) actually
-    get filled in, then drop the stale failed destination result so the
-    planner retries it instead of looping back to ``clarify`` forever.
+    """
+    Free-text clarification answers may append raw text to the query.
+    Re-run parser and fill only missing structured fields.
+
+    This function does not erase Redis-merged fields.
+    It only fills missing values from the reparsed query.
     """
 
     request_dict = dict(state.get("request") or {})
     query = request_dict.get("user_query") or state.get("raw_user_query", "")
 
     reparsed = asdict(intent_analyzer.analyze(query))
+    reparsed = _sanitize_request_dict(reparsed)
 
     for field_name in (
-        "source", "destination", "month", "days", "budget",
-        "travelers", "interests", "destination_scope",
+        "source",
+        "destination",
+        "month",
+        "days",
+        "budget",
+        "travelers",
+        "interests",
+        "destination_scope",
     ):
         if not request_dict.get(field_name) and reparsed.get(field_name):
             request_dict[field_name] = reparsed[field_name]
 
-    state["request"] = request_dict
+    state["request"] = _sanitize_request_dict(request_dict)
 
     agent_results = dict(state.get("agent_results") or {})
 
-    if AGENT_DESTINATION in agent_results and not agent_results[AGENT_DESTINATION].get("success"):
+    if (
+        AGENT_DESTINATION in agent_results
+        and not agent_results[AGENT_DESTINATION].get("success")
+    ):
         agent_results.pop(AGENT_DESTINATION, None)
         state["agent_results"] = agent_results
 
 
 # ---------------------------------------------------------------------- #
-# Destination — scope resolution / city recommendation / no-destination
-# recommendation. Never fetches attractions itself.
+# Destination
 # ---------------------------------------------------------------------- #
 
 def destination_node(state: TripState) -> TripState:
@@ -220,8 +261,7 @@ def destination_node(state: TripState) -> TripState:
 
 
 # ---------------------------------------------------------------------- #
-# Attractions — fetched and ranked separately for each selected city.
-# Never fetches for the whole region.
+# Attractions
 # ---------------------------------------------------------------------- #
 
 def attractions_node(state: TripState) -> TripState:
@@ -236,7 +276,10 @@ def attractions_node(state: TripState) -> TripState:
         agent_input = _base_agent_input(
             request,
             destination=city,
-            context={"destination_mode": "fetch_attractions", "target_city": city},
+            context={
+                "destination_mode": "fetch_attractions",
+                "target_city": city,
+            },
         )
 
         result = AGENT_REGISTRY[AGENT_DESTINATION].run(agent_input)
@@ -244,7 +287,12 @@ def attractions_node(state: TripState) -> TripState:
         if result.success:
             city_attractions[city] = result.data
         else:
-            city_attractions[city] = {"ranked_places": [], "places": [], "error": result.error}
+            city_attractions[city] = {
+                "ranked_places": [],
+                "places": [],
+                "error": result.error,
+            }
+
             errors = list(state.get("errors") or [])
             errors.append(f"attractions:{city}: {result.error}")
             state["errors"] = errors
@@ -255,12 +303,12 @@ def attractions_node(state: TripState) -> TripState:
 
 
 # ---------------------------------------------------------------------- #
-# Climate / Hotel — single-destination agents, looped per selected city and
-# aggregated. The agents themselves are unchanged.
+# Climate / Hotel helper
 # ---------------------------------------------------------------------- #
 
 def _run_per_city(state: TripState, agent_name: str, extra_context_fn) -> TripState:
     request = _request_from_state(state)
+
     selected_cities = state.get("selected_cities") or (
         [request.destination] if request.destination else []
     )
@@ -269,7 +317,12 @@ def _run_per_city(state: TripState, agent_name: str, extra_context_fn) -> TripSt
     overall_success = True
 
     for city in selected_cities:
-        agent_input = _base_agent_input(request, destination=city, context=extra_context_fn(request))
+        agent_input = _base_agent_input(
+            request,
+            destination=city,
+            context=extra_context_fn(request),
+        )
+
         result = AGENT_REGISTRY[agent_name].run(agent_input)
         per_city[city] = asdict(result)
 
@@ -287,6 +340,7 @@ def _run_per_city(state: TripState, agent_name: str, extra_context_fn) -> TripSt
         ),
         error=None if overall_success else "One or more cities failed.",
     )
+
     _record_result(state, agent_name, output)
 
     return state
@@ -301,15 +355,20 @@ def climate_node(state: TripState) -> TripState:
 
 
 def hotel_node(state: TripState) -> TripState:
-    return _run_per_city(state, AGENT_HOTEL, lambda request: {})
+    return _run_per_city(
+        state,
+        AGENT_HOTEL,
+        lambda request: {},
+    )
 
 
 # ---------------------------------------------------------------------- #
-# Transport — intra-city order, city order, final travel sequence.
+# Transport
 # ---------------------------------------------------------------------- #
 
 def transport_node(state: TripState) -> TripState:
     request = _request_from_state(state)
+
     agent_input = _base_agent_input(
         request,
         context={
@@ -328,11 +387,12 @@ def transport_node(state: TripState) -> TripState:
 
 
 # ---------------------------------------------------------------------- #
-# Budget — feasibility only.
+# Budget
 # ---------------------------------------------------------------------- #
 
 def budget_node(state: TripState) -> TripState:
     request = _request_from_state(state)
+
     transport_result = (state.get("agent_results") or {}).get(AGENT_TRANSPORT) or {}
     inter_city_legs = (transport_result.get("data") or {}).get("inter_city_legs") or []
 
@@ -354,11 +414,12 @@ def budget_node(state: TripState) -> TripState:
 
 
 # ---------------------------------------------------------------------- #
-# Itinerary — multi-city skeleton.
+# Itinerary
 # ---------------------------------------------------------------------- #
 
 def itinerary_node(state: TripState) -> TripState:
     request = _request_from_state(state)
+
     agent_input = _base_agent_input(
         request,
         context={
@@ -374,17 +435,16 @@ def itinerary_node(state: TripState) -> TripState:
 
 
 # ---------------------------------------------------------------------- #
-# Replan — applies one directive and clears the agent results it invalidates.
+# Replan
 # ---------------------------------------------------------------------- #
 
 def replan_node(state: TripState) -> TripState:
     planner_agent.apply_replan_directive(state)
-
     return state
 
 
 # ---------------------------------------------------------------------- #
-# Compose — terminal node.
+# Compose
 # ---------------------------------------------------------------------- #
 
 def compose_node(state: TripState) -> TripState:

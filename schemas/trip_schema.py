@@ -65,6 +65,8 @@ class TripState(TypedDict, total=False):
     # --- Terminal ---
     final_response: Optional[Dict[str, Any]]
     done: bool
+    trip_memory: Dict[str, Any]
+    conversation_history: List[Dict[str, Any]]
 
 
 @dataclass

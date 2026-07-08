@@ -1,5 +1,6 @@
 import html
 import json
+import re
 from typing import Any, Dict, List
 
 import google.generativeai as genai
@@ -9,14 +10,121 @@ from schemas.trip_schema import TripState
 
 
 class FinalResponseComposer:
-    """Turns a finished ``TripState`` into the user-facing plan.
-
-    By the time this runs, destination hierarchy has already been resolved
-    structurally by the graph (region -> city recommendations -> user
-    selection happens before ``compose`` is ever reached), so this composer
-    always writes a concrete, city-grouped itinerary rather than branching on
-    destination scope.
     """
+    Turns a completed TripState into the final user-facing Markdown response.
+
+    Important:
+    - TransportAgent owns route/sequence construction.
+    - Composer only renders the prepared travel_sequence/display_sequence.
+    """
+
+    STRONG_ATTRACTION_TERMS = [
+        "tourism",
+        "tourism.attraction",
+        "tourism.sights",
+        "tourism.information",
+        "entertainment.museum",
+        "museum",
+        "heritage",
+        "historic",
+        "historical",
+        "monument",
+        "memorial",
+        "castle",
+        "fort",
+        "palace",
+        "archaeological",
+        "religion",
+        "temple",
+        "church",
+        "mosque",
+        "natural",
+        "natural.water",
+        "natural.mountain",
+        "natural.forest",
+        "natural.beach",
+        "beach",
+        "lake",
+        "waterfall",
+        "park",
+        "garden",
+        "viewpoint",
+        "zoo",
+        "aquarium",
+        "leisure.park",
+        "validated_landmark",
+    ]
+
+    WEAK_OR_NON_ATTRACTION_TERMS = [
+        "catering",
+        "restaurant",
+        "cafe",
+        "coffee",
+        "bar",
+        "pub",
+        "fast_food",
+        "food_court",
+        "accommodation",
+        "hotel",
+        "hostel",
+        "guest_house",
+        "apartment",
+        "resort",
+        "commercial",
+        "shop",
+        "shopping",
+        "marketplace",
+        "supermarket",
+        "mall",
+        "book",
+        "books",
+        "bookstore",
+        "office",
+        "bank",
+        "atm",
+        "street",
+        "road",
+        "highway",
+        "residential",
+        "building",
+        "service",
+        "healthcare",
+        "hospital",
+        "pharmacy",
+        "education",
+        "school",
+        "college",
+        "university",
+        "parking",
+        "fuel",
+        "transport",
+        "bus",
+        "railway",
+        "airport",
+    ]
+
+    WEAK_NAME_HINTS = [
+        "road",
+        "street",
+        "rasta",
+        "marg",
+        "path",
+        "lane",
+        "hotel",
+        "restaurant",
+        "cafe",
+        "coffee",
+        "bhojnalaya",
+        "dhaba",
+        "bar",
+        "pub",
+        "book",
+        "pustak",
+        "store",
+        "shop",
+        "bank",
+        "atm",
+    ]
 
     def __init__(self):
         self.model = None
@@ -41,7 +149,7 @@ class FinalResponseComposer:
             response = self.model.generate_content(
                 prompt,
                 generation_config={
-                    "temperature": 0.25,
+                    "temperature": 0.18,
                     "top_p": 0.8,
                     "top_k": 40,
                 },
@@ -59,7 +167,7 @@ class FinalResponseComposer:
 
             return {
                 "success": True,
-                "response": html.unescape(text),
+                "response": self._clean_final_response(text),
                 "input_payload": compact_payload,
             }
 
@@ -92,18 +200,20 @@ class FinalResponseComposer:
 
         for city, data in city_attractions.items():
             places = (data or {}).get("ranked_places") or (data or {}).get("places") or []
-            filtered = self._filter_high_quality_places(places)
+            filtered_places = self._filter_high_quality_places(places)
 
             compact_cities[city] = {
-                "places_available": len(filtered) > 0,
-                "poi_quality": "usable" if len(filtered) >= 3 else "weak",
-                "places": filtered[:8],
+                "places_available": len(filtered_places) > 0,
+                "poi_quality": "usable" if len(filtered_places) >= 3 else "weak",
+                "usable_place_count": len(filtered_places),
+                "places": filtered_places[:8],
             }
 
         climate_by_city = self._safe_get(agent_results, ["climate_agent", "data", "by_city"]) or {}
         hotel_by_city = self._safe_get(agent_results, ["hotel_agent", "data", "by_city"]) or {}
         itinerary_result = self._safe_get(agent_results, ["itinerary_agent", "data"]) or {}
         budget_result = self._safe_get(agent_results, ["budget_agent", "data"]) or {}
+        transport_result = self._safe_get(agent_results, ["transport_agent", "data"]) or {}
 
         compact_climate = {
             city: self._safe_get(result, ["data", "raw_climate_data"])
@@ -115,23 +225,23 @@ class FinalResponseComposer:
             for city, result in hotel_by_city.items()
         }
 
+        prepared_travel_sequence = payload.get("travel_sequence") or transport_result
+
         return {
             "request": request,
             "selected_cities": payload.get("selected_cities", []),
             "city_attractions": compact_cities,
             "climate_by_city": compact_climate,
             "hotel_by_city": compact_hotel,
-            "travel_sequence": payload.get("travel_sequence"),
+            "travel_sequence": prepared_travel_sequence,
             "itinerary_skeleton": itinerary_result,
             "budget_result": budget_result,
             "feasible": payload.get("feasible"),
             "replan_directives": payload.get("replan_directives", []),
             "errors": payload.get("errors", []),
             "composer_instruction": (
-                "Use named POIs for a city only if that city's poi_quality is usable. "
-                "If poi_quality is weak for a city, describe that city's day(s) at a high level "
-                "using destination, interests, climate, transport, hotel, and budget context instead "
-                "of inventing place names."
+                "Render travel_sequence.display_sequence exactly as the prepared route flow. "
+                "Do not build route sequence yourself. Do not invent distances or local POI order."
             ),
         }
 
@@ -139,43 +249,8 @@ class FinalResponseComposer:
         if not places:
             return []
 
-        preferred_category_terms = [
-            "tourism",
-            "attraction",
-            "natural",
-            "beach",
-            "leisure",
-            "heritage",
-            "museum",
-            "park",
-            "viewpoint",
-            "zoo",
-            "garden",
-            "waterfall",
-            "fort",
-            "palace",
-            "temple",
-            "church",
-            "monument",
-        ]
-
-        weak_or_non_itinerary_terms = [
-            "catering",
-            "restaurant",
-            "cafe",
-            "bar",
-            "pub",
-            "accommodation",
-            "hotel",
-            "hostel",
-            "guest_house",
-            "apartment",
-            "commercial",
-            "bank",
-            "office",
-        ]
-
         filtered = []
+        seen_names = set()
 
         for item in places:
             if not isinstance(item, dict):
@@ -186,32 +261,69 @@ class FinalResponseComposer:
             if not name:
                 continue
 
-            categories = item.get("category") or item.get("categories") or []
+            normalized_name = name.lower().strip()
+
+            if normalized_name in seen_names:
+                continue
+
+            if self._looks_like_weak_name(normalized_name):
+                continue
+
+            categories = (
+                item.get("categories")
+                or item.get("category")
+                or item.get("kinds")
+                or []
+            )
 
             if isinstance(categories, str):
                 categories = [categories]
 
             category_text = " ".join(str(category).lower() for category in categories)
 
-            has_preferred = any(term in category_text for term in preferred_category_terms)
-            has_weak = any(term in category_text for term in weak_or_non_itinerary_terms)
-
-            if has_weak and not has_preferred:
+            if self._has_weak_category(category_text):
                 continue
 
-            if not has_preferred:
+            if not self._has_strong_attraction_category(category_text):
                 continue
+
+            seen_names.add(normalized_name)
 
             filtered.append(
                 {
                     "name": name,
-                    "category": categories,
-                    "formatted_address": self._clean_text(item.get("formatted_address")),
-                    "distance_meters": item.get("distance_meters"),
+                    "categories": categories,
+                    "formatted_address": self._clean_text(
+                        item.get("formatted_address")
+                        or item.get("address")
+                        or item.get("formatted")
+                    ),
+                    "distance_meters": item.get("distance_meters") or item.get("distance"),
+                    "latitude": item.get("latitude"),
+                    "longitude": item.get("longitude"),
+                    "source": item.get("source") or "places_service",
                 }
             )
 
         return filtered
+
+    def _has_strong_attraction_category(self, category_text: str) -> bool:
+        if not category_text:
+            return False
+
+        return any(term in category_text for term in self.STRONG_ATTRACTION_TERMS)
+
+    def _has_weak_category(self, category_text: str) -> bool:
+        if not category_text:
+            return False
+
+        return any(term in category_text for term in self.WEAK_OR_NON_ATTRACTION_TERMS)
+
+    def _looks_like_weak_name(self, normalized_name: str) -> bool:
+        if not normalized_name:
+            return True
+
+        return any(hint in normalized_name for hint in self.WEAK_NAME_HINTS)
 
     def _safe_get(self, data: Dict[str, Any], path: list, default=None):
         current = data
@@ -234,44 +346,78 @@ class FinalResponseComposer:
         if not isinstance(value, str):
             return value
 
-        return html.unescape(value).strip()
+        value = html.unescape(value)
+        value = re.sub(r"\s+", " ", value)
+        return value.strip()
+
+    def _clean_final_response(self, text: str) -> str:
+        text = html.unescape(text)
+        text = text.replace("\u00a0", " ")
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+
+        text = re.sub(r"([a-z])It ", r"\1. It ", text)
+        text = re.sub(r"([a-z])This ", r"\1. This ", text)
+        text = re.sub(r"([a-z])Please ", r"\1. Please ", text)
+
+        return text.strip()
 
     def _build_prompt(self, payload: Dict[str, Any]) -> str:
         return f"""
 You are a professional AI trip planning assistant.
 
-Your job is to compose the final user-facing travel response using structured outputs from multiple agents, covering one or more cities.
+Your job:
+Compose the final user-facing travel response using structured outputs from trip-planning components.
 
-Architecture rule:
-- Agents provide raw facts.
-- You generate final reasoning, advice, and itinerary.
-- Do not expose internal JSON or agent names.
+Architecture rules:
+- Components provide raw facts.
+- You generate the final written response.
+- Do not expose internal JSON.
+- Do not mention internal component names.
+- Do not invent exact transport distances, hotel names, or attraction names.
 
-General rules:
-1. Do not invent exact transport numbers. Use travel_sequence data only if present.
-2. Do not invent exact hotel names if hotel POIs are missing for a city.
-3. Do not blindly use restaurant, cafe, hotel, bank, street, statue, office, or random local POI names as main attractions.
-4. For any city where poi_quality is "weak", do not mention that city's POI names.
-5. Where POIs are weak, create a high-level plan for that city's days based on:
-   - the city itself
-   - user interests
-   - that city's climate data
-   - transport/travel data
-   - hotel stay signals
-   - budget estimate
-6. Use raw climate data (per city) to generate practical climate-aware advice.
-7. Use travel_sequence to describe the order attractions and cities should be visited in, and inter-city legs (distance/duration) where present.
-8. Use hotel data (per city) only as accommodation guidance. If hotel POIs are missing for a city, suggest checking booking platforms for that city.
-9. Budget estimate is rough. Make that clear.
-10. If "feasible" is false, include a short, honest note that the requested days may be tight for the chosen cities, referencing replan_directives if present, without being alarmist.
-11. Do not output HTML entities like &amp;.
-12. Keep the response concise, polished, and useful.
-13. Group the itinerary by city, in the order given by travel_sequence/selected_cities, with day numbers continuing across cities (do not restart at Day 1 for each city).
+CRITICAL TRAVEL SEQUENCE RULES:
+1. Use travel_sequence.display_sequence as the source of truth.
+2. Do not construct or infer route sequence yourself.
+3. Do not invent missing distances or durations.
+4. Render each transfer in display_sequence.
+5. Render each city_flow in display_sequence.
+6. If city_flow has poi_names, include those POIs as the local movement order.
+7. If city_flow has no POIs, write a high-level local flow only.
+8. For long transfers, mention that they should be treated as dedicated travel blocks.
+9. Do not list only city-to-city transfers if city_flow data is available.
+
+ATTRACTION RULES:
+10. Use named attractions only from structured city_attractions or travel_sequence city_flow.
+11. Never use restaurants, cafes, hotels, roads, streets, bookstores, shops, banks, offices, or random commercial POIs as attractions.
+12. Do not invent famous attractions missing from the structured context.
+
+CLIMATE RULES:
+13. Use climate_by_city for practical advice.
+14. Day-wise itinerary must reflect climate advice.
+15. For hot or humid months, schedule outdoor visits early morning/evening and midday rest/indoor activities.
+
+HOTEL RULES:
+16. Use hotel_by_city for stay-area guidance.
+17. Do not invent specific hotel names.
+18. If hotel data is limited, suggest areas and stay types.
+
+BUDGET RULES:
+19. Budget is a rough estimate. Say that clearly.
+20. If feasible is false, include a short feasibility warning.
+21. If replan_directives exist, explain the adjustment naturally.
+
+STYLE RULES:
+22. Keep the answer polished, professional, concise, and useful.
+23. Use Markdown.
+24. Day numbers must continue across cities.
+25. Do not output HTML entities like &amp;.
+26. Do not include internal field names like poi_quality, raw_climate_data, or agent_results.
 
 Structured planning context:
 {json.dumps(payload, indent=2, ensure_ascii=False)}
 
-Output format (Markdown):
+Output format:
 
 ## Trip Summary
 
@@ -281,7 +427,7 @@ Output format (Markdown):
 
 ## Stay Suggestions
 
-## Day-Wise Itinerary (grouped by city)
+## Day-Wise Itinerary
 
 ## Budget Snapshot
 

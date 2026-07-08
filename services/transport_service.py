@@ -11,6 +11,7 @@ class TransportService:
         self.geoapify_api_key = api_settings.geoapify_api_key
         self.openrouteservice_api_key = api_settings.openrouteservice_api_key
         self.timeout = network_settings.request_timeout
+        self.geoapify_ssl_verify = network_settings.geoapify_ssl_verify
         self.ssl_verify = network_settings.ssl_verify
 
         self.geoapify_geocode_url = "https://api.geoapify.com/v1/geocode/search"
@@ -92,7 +93,7 @@ class TransportService:
                 self.geoapify_geocode_url,
                 params=params,
                 timeout=self.timeout,
-                verify=self.ssl_verify,
+                verify=self.geoapify_ssl_verify,
             )
 
             response.raise_for_status()

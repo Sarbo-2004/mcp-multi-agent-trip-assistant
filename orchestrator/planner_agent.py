@@ -358,6 +358,26 @@ class PlannerAgent:
                 ),
             ),
             ClarificationRule(
+                rule_id="destination_city",
+                applies=lambda state: (
+                    not state.get("destination_resolved")
+                    and request_of(state).get("destination")
+                    and bool(
+                        (state.get("agent_results") or {}).get(AGENT_DESTINATION)
+                        and not (state.get("agent_results") or {}).get(AGENT_DESTINATION, {}).get("success")
+                    )
+                ),
+                build=lambda state: ClarificationQuestion(
+                    id="destination_city",
+                    question=(
+                        f"I couldn't resolve '{request_of(state).get('destination')}' into a valid destination. "
+                        "Which city would you like to visit instead?"
+                    ),
+                    kind=KIND_FREE_TEXT,
+                    fills_field="destination",
+                ),
+            ),
+            ClarificationRule(
                 rule_id="ambiguous_request",
                 applies=lambda state: float(request_of(state).get("confidence") or 1.0) < 0.45,
                 build=lambda state: ClarificationQuestion(

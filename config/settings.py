@@ -3,7 +3,8 @@ from dataclasses import dataclass
 from dotenv import load_dotenv
 
 load_dotenv()
-
+from typing import Optional
+from pydantic_settings import BaseSettings
 
 def str_to_bool(value: str, default: bool = True) -> bool:
     if value is None:
@@ -59,9 +60,35 @@ class APISettings:
 
 @dataclass
 class NetworkSettings:
-    ssl_verify: bool = str_to_bool(os.getenv("SSL_VERIFY", "true"), default=True)
+    ssl_verify: bool = str_to_bool(
+        os.getenv("SSL_VERIFY", os.getenv("VERIFY_SSL", "true")),
+        default=True,
+    )
+    geoapify_ssl_verify: bool = str_to_bool(
+        os.getenv(
+            "GEOAPIFY_VERIFY_SSL",
+            os.getenv("GEOAPIFY_SSL_VERIFY", os.getenv("SSL_VERIFY", os.getenv("VERIFY_SSL", "true"))),
+        ),
+        default=True,
+    )
     request_timeout: int = int(os.getenv("REQUEST_TIMEOUT", "30"))
 
+class RedisSettings(BaseSettings):
+    redis_enabled: bool = False
+    redis_url: Optional[str] = None
+
+    redis_ttl_seconds: int = 86400
+    redis_namespace: str = "trip_memory"
+
+    redis_socket_timeout: int = 10
+    redis_socket_connect_timeout: int = 10
+
+    class Config:
+        env_file = ".env"
+        extra = "ignore"
+
+
+redis_settings = RedisSettings()
 
 app_settings = AppSettings()
 mcp_settings = MCPSettings()

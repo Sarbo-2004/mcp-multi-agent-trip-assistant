@@ -10,7 +10,7 @@ class WeatherService:
     def __init__(self):
         self.geoapify_api_key = api_settings.geoapify_api_key
         self.timeout = network_settings.request_timeout
-        self.ssl_verify = network_settings.ssl_verify
+        self.ssl_verify = network_settings.geoapify_ssl_verify
 
         self.geoapify_geocode_url = "https://api.geoapify.com/v1/geocode/search"
         self.open_meteo_forecast_url = "https://api.open-meteo.com/v1/forecast"

@@ -3,9 +3,11 @@ import json
 import threading
 from typing import Any, Dict, List, Optional
 
+import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
+from config.settings import network_settings
 from schemas.mcp_schema import MCPToolResponse
 
 
@@ -77,7 +79,16 @@ class BaseMCPClient:
         tool_name: str,
         arguments: Dict[str, Any],
     ) -> MCPToolResponse:
-        async with streamablehttp_client(self.server_url) as transport:
+        async with streamablehttp_client(
+            self.server_url,
+            httpx_client_factory=lambda headers, timeout, auth: httpx.AsyncClient(
+                follow_redirects=True,
+                verify=network_settings.ssl_verify,
+                headers=headers,
+                timeout=timeout,
+                auth=auth,
+            ),
+        ) as transport:
             read_stream, write_stream, _ = transport
 
             async with ClientSession(read_stream, write_stream) as session:
@@ -100,7 +111,16 @@ class BaseMCPClient:
                 )
 
     async def _list_tools(self) -> List[Dict[str, Any]]:
-        async with streamablehttp_client(self.server_url) as transport:
+        async with streamablehttp_client(
+            self.server_url,
+            httpx_client_factory=lambda headers, timeout, auth: httpx.AsyncClient(
+                follow_redirects=True,
+                verify=network_settings.ssl_verify,
+                headers=headers,
+                timeout=timeout,
+                auth=auth,
+            ),
+        ) as transport:
             read_stream, write_stream, _ = transport
 
             async with ClientSession(read_stream, write_stream) as session:
