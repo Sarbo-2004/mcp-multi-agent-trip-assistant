@@ -55,13 +55,196 @@ DEBUG=false
 import streamlit as st
 
 from orchestrator.trip_orchestrator import TripOrchestrator
+from memory.redis_trip_memory import RedisTripMemory
 
 
 st.set_page_config(
     page_title="MCP Trip Planner",
     page_icon="🧭",
-    layout="centered",
+    layout="wide",
+    initial_sidebar_state="collapsed",
 )
+
+
+def inject_styles():
+    st.markdown(
+        """
+        <style>
+        html, body, [data-testid="stAppViewContainer"] {
+            background:
+                radial-gradient(circle at top left, rgba(56, 189, 248, 0.14), transparent 32%),
+                radial-gradient(circle at top right, rgba(99, 102, 241, 0.14), transparent 30%),
+                linear-gradient(135deg, #020617 0%, #07111f 45%, #0f172a 100%) !important;
+            color: #f8fafc !important;
+        }
+
+        [data-testid="stSidebar"] {
+            display: none !important;
+        }
+
+        [data-testid="stHeader"] {
+            background: transparent !important;
+        }
+
+        [data-testid="stToolbar"],
+        [data-testid="stDecoration"],
+        .stDeployButton,
+        #MainMenu,
+        footer {
+            visibility: hidden !important;
+            display: none !important;
+        }
+
+        .block-container {
+            max-width: 1220px !important;
+            padding-top: 1.4rem !important;
+            padding-bottom: 2.4rem !important;
+        }
+
+        h1, h2, h3, h4, h5, h6 {
+            color: #f8fafc !important;
+            letter-spacing: -0.02em;
+        }
+
+        p, li, span, label {
+            color: #dbeafe !important;
+        }
+
+        small {
+            color: #94a3b8 !important;
+        }
+
+        div[data-testid="stMetric"] {
+            background: rgba(2, 6, 23, 0.34);
+            border: 1px solid rgba(148, 163, 184, 0.16);
+            border-radius: 18px;
+            padding: 16px 18px;
+            box-shadow: 0 14px 36px rgba(2, 6, 23, 0.24);
+        }
+
+        div[data-testid="stMetric"] label {
+            color: #94a3b8 !important;
+            font-size: 0.78rem !important;
+            font-weight: 800 !important;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        div[data-testid="stMetricValue"] {
+            color: #f8fafc !important;
+            font-weight: 850 !important;
+        }
+
+        div[data-testid="stTabs"] {
+            border: 1px solid rgba(148, 163, 184, 0.16);
+            background: rgba(2, 6, 23, 0.35);
+            border-radius: 24px;
+            padding: 10px;
+        }
+
+        div[data-testid="stTabs"] button {
+            color: #cbd5e1 !important;
+            font-weight: 800 !important;
+            border-radius: 14px !important;
+            padding: 10px 16px !important;
+        }
+
+        div[data-testid="stTabs"] button[aria-selected="true"] {
+            background: linear-gradient(135deg, rgba(14, 165, 233, 0.30), rgba(99, 102, 241, 0.22)) !important;
+            color: #ffffff !important;
+            border: 1px solid rgba(125, 211, 252, 0.24) !important;
+        }
+
+        div[data-testid="stChatMessage"] {
+            background: rgba(2, 6, 23, 0.36);
+            border: 1px solid rgba(148, 163, 184, 0.14);
+            border-radius: 20px;
+            padding: 14px 16px;
+            margin-bottom: 12px;
+        }
+
+        div[data-testid="stChatMessage"] p,
+        div[data-testid="stChatMessage"] li {
+            color: #e5e7eb !important;
+            line-height: 1.62;
+        }
+
+        div[data-testid="stChatMessage"] h1,
+        div[data-testid="stChatMessage"] h2,
+        div[data-testid="stChatMessage"] h3,
+        div[data-testid="stChatMessage"] strong {
+            color: #ffffff !important;
+        }
+
+        textarea {
+            background: rgba(15, 23, 42, 0.96) !important;
+            color: #f8fafc !important;
+            border: 1px solid rgba(148, 163, 184, 0.30) !important;
+            border-radius: 18px !important;
+        }
+
+        textarea::placeholder {
+            color: #64748b !important;
+        }
+
+        .stButton > button {
+            border-radius: 14px !important;
+            border: 1px solid rgba(56, 189, 248, 0.34) !important;
+            background: linear-gradient(135deg, rgba(14, 165, 233, 0.96), rgba(37, 99, 235, 0.96)) !important;
+            color: #ffffff !important;
+            font-weight: 850 !important;
+        }
+
+        details {
+            border: 1px solid rgba(148, 163, 184, 0.14) !important;
+            background: rgba(2, 6, 23, 0.28) !important;
+            border-radius: 16px !important;
+            margin-bottom: 10px !important;
+        }
+
+        details summary {
+            color: #e2e8f0 !important;
+            font-weight: 850 !important;
+        }
+
+        pre {
+            background: rgba(2, 6, 23, 0.84) !important;
+            border: 1px solid rgba(148, 163, 184, 0.16) !important;
+            border-radius: 16px !important;
+        }
+
+        code {
+            color: #dbeafe !important;
+        }
+
+        div[data-testid="stAlert"] {
+            background: rgba(15, 23, 42, 0.74) !important;
+            color: #e2e8f0 !important;
+            border-radius: 16px !important;
+            border: 1px solid rgba(148, 163, 184, 0.16) !important;
+        }
+
+        div[data-testid="stForm"] {
+            border: 1px solid rgba(251, 191, 36, 0.24);
+            background: rgba(120, 53, 15, 0.16);
+            border-radius: 20px;
+            padding: 18px;
+        }
+
+        input,
+        div[data-baseweb="select"] > div {
+            background: rgba(15, 23, 42, 0.92) !important;
+            color: #f8fafc !important;
+            border-color: rgba(148, 163, 184, 0.24) !important;
+        }
+
+        hr {
+            border-color: rgba(148, 163, 184, 0.16) !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def init_state():
@@ -74,24 +257,40 @@ def init_state():
     if "last_result" not in st.session_state:
         st.session_state.last_result = None
 
-    if "pending_prompt" not in st.session_state:
-        st.session_state.pending_prompt = None
+    if "memory_store" not in st.session_state:
+        st.session_state.memory_store = RedisTripMemory()
+
+    if "memory_session_id" not in st.session_state:
+        st.session_state.memory_session_id = st.session_state.memory_store.create_session_id()
+
+
+def reset_app():
+    if "memory_store" in st.session_state and "memory_session_id" in st.session_state:
+        st.session_state.memory_store.clear(st.session_state.memory_session_id)
+
+    st.session_state.messages = []
+    st.session_state.last_result = None
+    st.session_state.orchestrator = TripOrchestrator()
+    st.session_state.memory_session_id = st.session_state.memory_store.create_session_id()
+    st.rerun()
 
 
 def _clarification_summary_text(clarification: dict) -> str:
     reason = clarification.get("reason") or "I need a bit more information to continue."
     questions = clarification.get("questions") or []
+
     lines = [reason]
 
     for question in questions:
-        lines.append(f"- {question.get('question')}")
+        question_text = question.get("question")
+        if question_text:
+            lines.append(f"- {question_text}")
 
     return "\n".join(lines)
 
 
 def _record_result(user_facing_content: str, result: dict):
     st.session_state.last_result = result
-
     st.session_state.messages.append(
         {
             "role": "assistant",
@@ -109,57 +308,214 @@ def run_query(user_query: str):
         }
     )
 
-    with st.spinner("Planning your trip..."):
-        result = st.session_state.orchestrator.run(user_query=user_query, debug=False)
+    with st.spinner("Planning with MCP tools and specialist agents..."):
+        result = st.session_state.orchestrator.run(
+            user_query=user_query,
+            debug=False,
+            session_id=st.session_state.memory_session_id,
+        )
 
     if result.get("awaiting_clarification"):
         content = _clarification_summary_text(result.get("clarification") or {})
     else:
-        content = result.get("response") or result.get("error") or "I could not generate a final response."
+        content = (
+            result.get("response")
+            or result.get("error")
+            or "I could not generate a final response."
+        )
 
     _record_result(content, result)
 
 
 def run_answer(answers: dict):
-    with st.spinner("Continuing..."):
-        result = st.session_state.orchestrator.run(answer=answers, debug=False)
+    with st.spinner("Continuing the planning workflow..."):
+        result = st.session_state.orchestrator.run(
+            answer=answers,
+            debug=False,
+            session_id=st.session_state.memory_session_id,
+        )
 
     if result.get("awaiting_clarification"):
         content = _clarification_summary_text(result.get("clarification") or {})
     else:
-        content = result.get("response") or result.get("error") or "I could not generate a final response."
+        content = (
+            result.get("response")
+            or result.get("error")
+            or "I could not generate a final response."
+        )
 
     _record_result(content, result)
+
+
+def _safe_len(value) -> int:
+    return len(value or [])
+
+
+def _short_list(value, max_chars: int = 42) -> str:
+    items = value or []
+
+    if not items:
+        return "-"
+
+    text = ", ".join(str(item) for item in items)
+
+    if len(text) > max_chars:
+        return text[: max_chars - 3] + "..."
+
+    return text
+
+
+def _get_status_text(last_result: dict) -> str:
+    if not last_result:
+        return "Ready"
+
+    if last_result.get("awaiting_clarification"):
+        return "Needs Input"
+
+    if last_result.get("success"):
+        return "Completed"
+
+    return "Attention"
+
+
+def _compact_value(value, max_len: int = 95) -> str:
+    if value is None:
+        return "-"
+
+    if isinstance(value, (list, tuple)):
+        if not value:
+            return "-"
+
+        text = ", ".join(str(item) for item in value[:5])
+
+        if len(value) > 5:
+            text += f" +{len(value) - 5} more"
+
+        return text[:max_len] + "..." if len(text) > max_len else text
+
+    if isinstance(value, dict):
+        keys = list(value.keys())
+
+        if not keys:
+            return "-"
+
+        text = ", ".join(keys[:6])
+
+        if len(keys) > 6:
+            text += f" +{len(keys) - 6} more"
+
+        return text[:max_len] + "..." if len(text) > max_len else text
+
+    text = str(value)
+    return text[:max_len] + "..." if len(text) > max_len else text
+
+
+
+def render_header():
+    last_result = st.session_state.last_result or {}
+    workflow = last_result.get("workflow") or {}
+    summary = last_result.get("summary") or {}
+
+    status = _get_status_text(last_result)
+    completed_count = _safe_len(workflow.get("completed_agents"))
+    failed_count = _safe_len(workflow.get("failed_agents"))
+    replan_count = workflow.get("replan_count", 0)
+    selected_cities = summary.get("selected_cities") or []
+
+    st.caption("🧭 MCP TRAVEL INTELLIGENCE")
+    st.title("Dynamic Multi-Agent Trip Planner")
+    st.write(
+        "A planner-led travel assistant powered by MCP tools, specialist agents, "
+        "route intelligence, climate checks, lodging signals, budget feasibility "
+        "and adaptive replanning."
+    )
+
+    metric_cols = st.columns(5)
+
+    with metric_cols[0]:
+        st.metric("Status", status)
+
+    with metric_cols[1]:
+        st.metric(
+            "Completed",
+            completed_count,
+            help="Actual agents completed",
+        )
+
+    with metric_cols[2]:
+        st.metric(
+            "Failed",
+            failed_count,
+            help="Failed agents captured safely",
+        )
+
+    with metric_cols[3]:
+        st.metric(
+            "Replans",
+            replan_count,
+            help="Automatic replanning attempts",
+        )
+
+    with metric_cols[4]:
+        st.metric(
+            "Cities",
+            _safe_len(selected_cities),
+            help=_short_list(selected_cities),
+        )
+
+    st.divider()
+
+
+
+def render_action_row():
+    col1, col2 = st.columns([0.82, 0.18])
+
+    with col1:
+        st.caption(
+            "Try: Plan a 4-day Odisha trip from West Bengal for 5 people in May with temples and beaches."
+        )
+
+    with col2:
+        if st.button("Clear Chat", use_container_width=True):
+            reset_app()
 
 
 def _render_question_input(question: dict):
     kind = question.get("kind", "free_text")
     options = question.get("options") or []
-    widget_key = f"clarify_{question.get('id')}"
+    widget_key = f"clarify_{question.get('id')}_{len(st.session_state.messages)}"
     label = question.get("question") or "Please provide more detail"
 
     if kind == "single_select" and options:
         labels = [option.get("label") for option in options]
         ids = [option.get("id") for option in options]
-        choice = st.radio(label, labels, key=widget_key)
+
+        choice = st.radio(
+            label,
+            labels,
+            key=widget_key,
+            horizontal=True,
+        )
+
         return ids[labels.index(choice)] if choice in labels else None
 
     if kind == "multi_select" and options:
         labels = [option.get("label") for option in options]
         ids = [option.get("id") for option in options]
-        chosen = st.multiselect(label, labels, key=widget_key)
+
+        chosen = st.multiselect(
+            label,
+            labels,
+            key=widget_key,
+            placeholder="Select one or more options",
+        )
+
         return [ids[labels.index(item)] for item in chosen]
 
     return st.text_input(label, key=widget_key)
 
 
 def render_pending_clarification():
-    """Generic form for whatever the planner is currently asking.
-
-    Renders every ``kind`` (free_text / single_select / multi_select) the
-    same way regardless of which clarification rule produced it, so new
-    clarification cases never require UI changes.
-    """
     last_result = st.session_state.last_result
 
     if not last_result or not last_result.get("awaiting_clarification"):
@@ -171,7 +527,7 @@ def render_pending_clarification():
     if not questions:
         return
 
-    st.markdown(f"##### {clarification.get('reason', 'A quick question')}")
+    st.warning(clarification.get("reason", "A quick question before continuing."))
 
     with st.form(key=f"clarification_form_{len(st.session_state.messages)}"):
         answers = {}
@@ -180,47 +536,140 @@ def render_pending_clarification():
             question_id = question.get("id")
             answers[question_id] = _render_question_input(question)
 
-        submitted = st.form_submit_button("Submit")
+        submitted = st.form_submit_button(
+            "Continue Planning",
+            use_container_width=True,
+        )
 
     if submitted:
         run_answer(answers)
         st.rerun()
 
 
-def render_sidebar():
-    with st.sidebar:
-        st.markdown("### MCP Trip Planner")
+def _agent_status_label(result: dict) -> str:
+    return "Success" if result.get("success") else "Failed"
 
-        st.markdown(
-            """
-            **System Flow**
 
-            - Intent Analyzer
-            - Planner Agent (routes every step)
-            - Clarification / City Selection
-            - Destination · Climate · Transport · Hotel · Itinerary · Budget MCP agents
-            - Replanning (feasibility gate)
-            - Final Composer
-            """
+def _agent_status_icon(result: dict) -> str:
+    return "✅" if result.get("success") else "⚠️"
+
+
+def _summarize_agent_result(agent_name: str, result: dict) -> dict:
+    data = result.get("data") or {}
+
+    summary = {
+        "Agent": agent_name,
+        "Status": _agent_status_label(result),
+        "Message": result.get("message") or "-",
+        "Error": result.get("error") or "-",
+        "Mode": "-",
+        "Output": "-",
+        "Cities": "-",
+    }
+
+    if agent_name == "destination_agent":
+        mode = data.get("mode")
+        summary["Mode"] = mode or "-"
+
+        if mode == "destination_recommendation":
+            recommended = data.get("recommended_destinations") or {}
+            recommendations = recommended.get("recommendations") or []
+            summary["Output"] = f"{len(recommendations)} destination recommendation(s)"
+        elif mode == "city_recommendation":
+            recommendations = data.get("city_recommendations") or []
+            summary["Output"] = f"{len(recommendations)} city recommendation(s)"
+        elif mode == "scope_resolved":
+            summary["Output"] = _compact_value(data.get("resolved_cities"))
+        elif mode == "city_attractions":
+            places = data.get("ranked_places") or data.get("places") or []
+            summary["Output"] = f"{len(places)} ranked place(s)"
+        else:
+            summary["Output"] = _compact_value(data)
+
+    elif agent_name == "climate_agent":
+        by_city = data.get("by_city") or {}
+        if by_city:
+            summary["Output"] = f"Climate data for {len(by_city)} city/cities"
+            summary["Cities"] = _compact_value(list(by_city.keys()))
+        else:
+            summary["Output"] = _compact_value(data)
+
+    elif agent_name == "hotel_agent":
+        by_city = data.get("by_city") or {}
+        if by_city:
+            summary["Output"] = f"Hotel/stay data for {len(by_city)} city/cities"
+            summary["Cities"] = _compact_value(list(by_city.keys()))
+        else:
+            summary["Output"] = _compact_value(data)
+
+    elif agent_name == "transport_agent":
+        display_sequence = data.get("display_sequence") or []
+        ordered_cities = data.get("ordered_cities") or []
+        summary["Output"] = f"{len(display_sequence)} sequence step(s)"
+        summary["Cities"] = _compact_value(ordered_cities)
+
+    elif agent_name == "itinerary_agent":
+        city_plans = data.get("city_plans") or []
+        total_days = data.get("total_days")
+        summary["Output"] = f"{total_days or '-'} day(s), {len(city_plans)} city plan(s)"
+        summary["Cities"] = _compact_value(
+            [plan.get("city") for plan in city_plans if plan.get("city")]
         )
 
-        st.divider()
+    elif agent_name == "budget_agent":
+        feasible = data.get("feasible")
+        estimated_cost = data.get("estimated_cost_inr")
+        summary["Output"] = f"Feasible: {feasible}, Estimated: INR {estimated_cost}"
 
-        if st.button("Clear chat"):
-            st.session_state.messages = []
-            st.session_state.last_result = None
-            st.session_state.pending_prompt = None
-            st.session_state.orchestrator = TripOrchestrator()
-            st.rerun()
+    else:
+        summary["Output"] = _compact_value(data)
 
-        st.divider()
-
-        st.caption("Use the tabs to inspect itinerary output, workflow logs, and agent results.")
+    return summary
 
 
-def render_itinerary_tab():
+def _render_agent_summary(selected_agent: str, selected_result: dict):
+    summary = _summarize_agent_result(selected_agent, selected_result)
+    icon = _agent_status_icon(selected_result)
+
+    if selected_result.get("success"):
+        st.success(f"{icon} **{selected_agent}** completed successfully")
+    else:
+        st.error(f"{icon} **{selected_agent}** failed")
+
+    c1, c2, c3 = st.columns([0.25, 0.35, 0.40])
+
+    with c1:
+        st.write("**Status**")
+        st.write(summary.get("Status"))
+
+        st.write("**Mode**")
+        st.write(summary.get("Mode") or "-")
+
+    with c2:
+        st.write("**Output**")
+        st.write(summary.get("Output") or "-")
+
+        st.write("**Cities**")
+        st.write(summary.get("Cities") or "-")
+
+    with c3:
+        st.write("**Message**")
+        st.write(summary.get("Message") or "-")
+
+        if summary.get("Error") and summary.get("Error") != "-":
+            st.write("**Error**")
+            st.warning(summary.get("Error"))
+
+
+def render_assistant_tab():
+    st.subheader("Assistant")
+    st.caption("Clean user-facing conversation. Internal workflow logs and raw tool outputs stay separate.")
+
     if not st.session_state.messages:
-        st.info("Start by typing your trip request in the chat input below.")
+        st.info(
+            "Start with a natural trip request. The assistant will resolve destinations, "
+            "fetch climate details, sequence transport, evaluate feasibility and generate a polished itinerary."
+        )
     else:
         for message in st.session_state.messages:
             role = message.get("role")
@@ -232,75 +681,209 @@ def render_itinerary_tab():
     render_pending_clarification()
 
 
-def render_logs_tab():
+def render_workflow_tab():
+    st.subheader("Workflow")
+    st.caption("High-level orchestration summary for evaluation and debugging.")
+
     last_result = st.session_state.last_result or {}
 
     if not last_result:
-        st.info("Logs appear here after you submit a request.")
+        st.info("Workflow summary will appear after you submit a request.")
         return
 
-    with st.expander("Request payload", expanded=False):
-        st.json(last_result.get("request", {}))
+    request = last_result.get("request") or {}
+    workflow = last_result.get("workflow") or {}
+    summary = last_result.get("summary") or {}
 
-    with st.expander("Workflow details", expanded=True):
-        st.json(last_result.get("workflow", {}))
+    completed_agents = workflow.get("completed_agents") or []
+    failed_agents = workflow.get("failed_agents") or []
+    selected_cities = summary.get("selected_cities") or []
+    feasible = summary.get("feasible")
 
-    with st.expander("Plan summary", expanded=False):
-        st.json(last_result.get("summary", {}))
+    feasible_text = "Yes" if feasible is True else "No" if feasible is False else "Unknown"
 
-    if last_result.get("error"):
-        st.error(last_result["error"])
+    c1, c2, c3, c4 = st.columns(4)
+
+    with c1:
+        st.metric("Completed Agents", len(completed_agents))
+
+    with c2:
+        st.metric("Failed Agents", len(failed_agents))
+
+    with c3:
+        st.metric("Selected Cities", len(selected_cities), help=_short_list(selected_cities))
+
+    with c4:
+        st.metric("Feasible", feasible_text)
+
+    with st.expander("Request Summary", expanded=True):
+        req_col1, req_col2, req_col3 = st.columns(3)
+
+        with req_col1:
+            st.write("**Source**")
+            st.write(request.get("source") or "-")
+            st.write("**Destination**")
+            st.write(request.get("destination") or "-")
+
+        with req_col2:
+            st.write("**Month**")
+            st.write(request.get("month") or "-")
+            st.write("**Days**")
+            st.write(request.get("days") or "-")
+
+        with req_col3:
+            st.write("**Budget**")
+            st.write(request.get("budget") or "-")
+            st.write("**Travelers**")
+            st.write(request.get("travelers") or "-")
+
+        st.write("**Interests**")
+        st.write(", ".join(request.get("interests") or []) or "-")
+
+    with st.expander("Agent Execution", expanded=True):
+        st.write("**Planned agents**")
+        st.write(workflow.get("planned_agents") or [])
+
+        st.write("**Completed agents**")
+        st.write(completed_agents)
+
+        if failed_agents:
+            st.write("**Failed agents**")
+            st.json(failed_agents)
+        else:
+            st.success("No failed agents in this run.")
+
+    with st.expander("Replanning", expanded=bool(workflow.get("replan_directives"))):
+        st.write("**Replan count**")
+        st.write(workflow.get("replan_count", 0))
+
+        st.write("**Directives**")
+        st.write(workflow.get("replan_directives") or [])
+
+    with st.expander("Travel Sequence", expanded=True):
+        st.json(summary.get("travel_sequence"))
+
+    if summary.get("errors"):
+        with st.expander("Captured Errors", expanded=True):
+            st.json(summary.get("errors"))
 
 
-def render_agent_outputs_tab():
+def render_data_tab():
+    st.subheader("Data")
+    st.caption(
+        "Structured agent outputs are summarized first. Expand raw payloads only when debugging is needed."
+    )
+
     last_result = st.session_state.last_result or {}
 
     if not last_result:
-        st.info("Agent outputs will be shown here once planning completes.")
+        st.info("Agent data will appear after a plan is generated.")
         return
 
     agent_results = last_result.get("agent_results") or {}
 
     if not agent_results:
         st.info("No agent outputs are available for this turn.")
-    else:
-        st.json(agent_results)
+        return
+
+    overview_rows = []
+
+    for agent_name, result in agent_results.items():
+        summary = _summarize_agent_result(agent_name, result)
+        overview_rows.append(
+            {
+                "Agent": summary.get("Agent"),
+                "Status": summary.get("Status"),
+                "Output": summary.get("Output"),
+                "Cities": summary.get("Cities"),
+            }
+        )
+
+    st.markdown("### Agent Output Overview")
+    st.dataframe(
+        overview_rows,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.divider()
+
+    st.markdown("### Inspect Agent Output")
+
+    agent_names = list(agent_results.keys())
+
+    selected_agent = st.selectbox(
+        "Choose an agent to inspect",
+        agent_names,
+        index=0,
+    )
+
+    selected_result = agent_results.get(selected_agent) or {}
+
+    _render_agent_summary(selected_agent, selected_result)
+
+    with st.expander("Structured Data", expanded=True):
+        st.json(selected_result.get("data") or {})
+
+    with st.expander("Full Raw Agent Payload", expanded=False):
+        st.json(selected_result)
+
+    st.divider()
+
+    st.markdown("### Raw Run Payloads")
+
+    payload_col1, payload_col2, payload_col3 = st.columns(3)
+
+    with payload_col1:
+        with st.expander("Request", expanded=False):
+            st.json(last_result.get("request", {}))
+
+    with payload_col2:
+        with st.expander("Workflow", expanded=False):
+            st.json(last_result.get("workflow", {}))
+
+    with payload_col3:
+        with st.expander("Summary", expanded=False):
+            st.json(last_result.get("summary", {}))
 
     if last_result.get("debug_state"):
-        with st.expander("Debug state", expanded=False):
+        with st.expander("Debug State", expanded=False):
             st.json(last_result.get("debug_state"))
 
 
 def main():
+    inject_styles()
     init_state()
-    render_sidebar()
 
-    st.title("🧭 Dynamic MCP Trip Planner")
-    st.caption("Plan trips using planner-led multi-agent orchestration with MCP tools.")
+    render_header()
+    render_action_row()
 
-    itinerary_tab, logs_tab, agent_outputs_tab = st.tabs([
-        "Itinerary",
-        "Logs",
-        "Agent Outputs",
-    ])
+    assistant_tab, workflow_tab, data_tab = st.tabs(
+        [
+            "Assistant",
+            "Workflow",
+            "Data",
+        ]
+    )
 
-    with itinerary_tab:
-        render_itinerary_tab()
+    with assistant_tab:
+        render_assistant_tab()
 
-    with logs_tab:
-        render_logs_tab()
+    with workflow_tab:
+        render_workflow_tab()
 
-    with agent_outputs_tab:
-        render_agent_outputs_tab()
+    with data_tab:
+        render_data_tab()
 
     awaiting_clarification = bool(
-        st.session_state.last_result and st.session_state.last_result.get("awaiting_clarification")
+        st.session_state.last_result
+        and st.session_state.last_result.get("awaiting_clarification")
     )
 
     placeholder = (
-        "Or type your answer here instead of using the form above..."
+        "Answer the clarification here, or use the form above..."
         if awaiting_clarification
-        else "Tell me what kind of trip you want..."
+        else "Ask for a trip plan..."
     )
 
     user_query = st.chat_input(placeholder)
@@ -312,7 +895,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 ```
 
 ---
@@ -440,6 +1022,31 @@ def start_servers():
 
 if __name__ == "__main__":
     start_servers()
+```
+
+---
+
+## File: `test_redis_connection.py`
+
+```py
+from memory.redis_trip_memory import RedisTripMemory
+
+store = RedisTripMemory()
+
+session_id = store.create_session_id()
+
+memory = store.default_memory()
+memory["request_memory"]["source"] = "West Bengal"
+memory["request_memory"]["destination"] = "Odisha"
+memory["request_memory"]["days"] = 4
+memory["request_memory"]["travelers"] = 5
+
+store.save(session_id, memory)
+
+loaded = store.load(session_id)
+
+print("SESSION:", session_id)
+print("LOADED REQUEST MEMORY:", loaded["request_memory"])
 ```
 
 ---
@@ -1057,24 +1664,24 @@ from mcp_clients.transport_mcp_client import TransportMCPClient
 
 
 class TransportAgent(BaseAgent):
-    """Builds the trip's travel sequence.
+    """
+    Builds the trip's structured travel sequence.
 
-    When per-city attraction data is available (hierarchical destination
-    planning), this agent never mixes attractions across cities. It:
-      1. Optimizes the visiting order of attractions *inside* each city.
-      2. Optimizes the order in which cities are visited.
-      3. Stitches both into one final travel sequence, with real
-         source→destination legs fetched between consecutive cities.
+    Responsibility:
+    - Use TransportMCPClient / transport MCP tools for route data.
+    - Order attractions inside each city when coordinates are available.
+    - Order cities when coordinates are available.
+    - Fetch real transfer legs between source/cities.
+    - Produce a rich display_sequence that the final composer can render.
 
-    Falls back to a single source→destination lookup when no per-city
-    attraction data is present in the input context (single-city / legacy
-    queries), preserving prior behavior.
+    FinalResponseComposer must not build routing logic itself. It should only
+    describe the sequence prepared here.
     """
 
     def __init__(self):
         metadata = AgentMetadata(
             name=AGENT_TRANSPORT,
-            description="Builds an intra-city and inter-city ordered travel sequence.",
+            description="Builds inter-city transfer sequence and intra-city POI movement flow.",
             depends_on=[],
             output_key="transport_result",
         )
@@ -1088,6 +1695,10 @@ class TransportAgent(BaseAgent):
             return self._build_multi_city_sequence(agent_input, city_attractions)
 
         return self._fetch_single_leg(agent_input)
+
+    # ------------------------------------------------------------------ #
+    # Multi-city / hierarchical destination flow
+    # ------------------------------------------------------------------ #
 
     def _build_multi_city_sequence(
         self,
@@ -1110,33 +1721,44 @@ class TransportAgent(BaseAgent):
             places = city_attractions.get(city, {}).get("ranked_places") or []
             usable_places = [
                 place for place in places
-                if place.get("latitude") is not None and place.get("longitude") is not None
+                if isinstance(place, dict)
+                and place.get("latitude") is not None
+                and place.get("longitude") is not None
+                and place.get("name")
             ]
 
             ordered_attractions = usable_places
             intra_city_distance_km = 0.0
+            intra_city_route_success = False
 
-            if usable_places:
+            if len(usable_places) > 1:
                 route_response = self.client.optimize_route(points=usable_places, start_index=0)
 
                 if route_response.success and route_response.data.get("success"):
                     ordered_attractions = route_response.data.get("ordered_points", usable_places)
                     intra_city_distance_km = route_response.data.get("total_distance_km", 0.0)
+                    intra_city_route_success = True
 
-            city_blocks.append({
-                "city": city,
-                "ordered_attractions": ordered_attractions,
-                "intra_city_distance_km": intra_city_distance_km,
-            })
+            city_blocks.append(
+                {
+                    "city": city,
+                    "ordered_attractions": self._compact_pois(ordered_attractions),
+                    "intra_city_distance_km": intra_city_distance_km,
+                    "intra_city_route_success": intra_city_route_success,
+                    "poi_count": len(ordered_attractions),
+                }
+            )
 
             centroid = self._centroid(usable_places)
 
             if centroid is not None:
-                city_points.append({
-                    "name": city,
-                    "latitude": centroid[0],
-                    "longitude": centroid[1],
-                })
+                city_points.append(
+                    {
+                        "name": city,
+                        "latitude": centroid[0],
+                        "longitude": centroid[1],
+                    }
+                )
 
         ordered_city_names = selected_cities
 
@@ -1145,28 +1767,44 @@ class TransportAgent(BaseAgent):
 
             if city_route_response.success and city_route_response.data.get("success"):
                 ordered_city_names = [
-                    point.get("name") for point in city_route_response.data.get("ordered_points", city_points)
+                    point.get("name")
+                    for point in city_route_response.data.get("ordered_points", city_points)
+                    if point.get("name")
                 ]
 
         city_blocks_by_name = {block["city"]: block for block in city_blocks}
-        ordered_city_blocks = [city_blocks_by_name[name] for name in ordered_city_names if name in city_blocks_by_name]
+        ordered_city_blocks = [
+            city_blocks_by_name[name]
+            for name in ordered_city_names
+            if name in city_blocks_by_name
+        ]
 
         inter_city_legs = self._fetch_inter_city_legs(agent_input, ordered_city_names)
-
         travel_sequence = self._assemble_sequence(ordered_city_blocks, inter_city_legs)
+        display_sequence = self._build_display_sequence(ordered_city_blocks, inter_city_legs)
 
         return self.success_response(
             data={
                 "mode": "multi_city_sequence",
+                "source": agent_input.source,
                 "ordered_cities": ordered_city_names,
                 "city_blocks": ordered_city_blocks,
                 "inter_city_legs": inter_city_legs,
                 "travel_sequence": travel_sequence,
+                "display_sequence": display_sequence,
+                "sequence_note": (
+                    "display_sequence is the prepared user-facing travel flow. "
+                    "Final composer should render this sequence, not rebuild routing logic."
+                ),
             },
             message="Multi-city travel sequence built successfully.",
         )
 
-    def _fetch_inter_city_legs(self, agent_input: AgentInput, ordered_city_names: List[str]) -> List[Dict[str, Any]]:
+    def _fetch_inter_city_legs(
+        self,
+        agent_input: AgentInput,
+        ordered_city_names: List[str],
+    ) -> List[Dict[str, Any]]:
         legs: List[Dict[str, Any]] = []
 
         waypoints = list(ordered_city_names)
@@ -1181,13 +1819,18 @@ class TransportAgent(BaseAgent):
                 mode="driving-car",
             )
 
-            legs.append({
-                "from": from_city,
-                "to": to_city,
-                "success": response.success,
-                "transport_data": response.data if response.success else None,
-                "error": response.error if not response.success else None,
-            })
+            transport_data = response.data if response.success else None
+            compact_transport_data = self._compact_transport_data(transport_data)
+
+            legs.append(
+                {
+                    "from": from_city,
+                    "to": to_city,
+                    "success": response.success,
+                    "transport_data": compact_transport_data,
+                    "error": response.error if not response.success else None,
+                }
+            )
 
         return legs
 
@@ -1196,45 +1839,159 @@ class TransportAgent(BaseAgent):
         ordered_city_blocks: List[Dict[str, Any]],
         inter_city_legs: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        legs_by_pair = {(leg["from"], leg["to"]): leg for leg in inter_city_legs}
         sequence: List[Dict[str, Any]] = []
-
-        previous_city: Optional[str] = None
+        used_leg_indexes = set()
 
         for block in ordered_city_blocks:
             city = block["city"]
 
-            leg = next((legs_by_pair[pair] for pair in legs_by_pair if pair[1] == city and (previous_city is None or pair[0] == previous_city)), None)
+            matching_leg_index = None
+            matching_leg = None
 
-            if leg is not None:
-                sequence.append({"type": "travel", **leg})
+            for index, leg in enumerate(inter_city_legs):
+                if index in used_leg_indexes:
+                    continue
 
-            sequence.append({
-                "type": "city_visit",
-                "city": city,
-                "ordered_attractions": block["ordered_attractions"],
-                "intra_city_distance_km": block["intra_city_distance_km"],
-            })
+                if leg.get("to") == city:
+                    matching_leg_index = index
+                    matching_leg = leg
+                    break
 
-            previous_city = city
+            if matching_leg is not None:
+                sequence.append({"type": "transfer", **matching_leg})
+                used_leg_indexes.add(matching_leg_index)
+
+            sequence.append(
+                {
+                    "type": "city_visit",
+                    "city": city,
+                    "ordered_attractions": block.get("ordered_attractions", []),
+                    "intra_city_distance_km": block.get("intra_city_distance_km", 0.0),
+                    "intra_city_route_success": block.get("intra_city_route_success", False),
+                }
+            )
 
         return sequence
 
-    @staticmethod
-    def _centroid(places: List[Dict[str, Any]]):
-        coords = [
-            (place["latitude"], place["longitude"])
-            for place in places
-            if place.get("latitude") is not None and place.get("longitude") is not None
+    def _build_display_sequence(
+        self,
+        ordered_city_blocks: List[Dict[str, Any]],
+        inter_city_legs: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """
+        This is the final structured sequence that the composer should render.
+
+        Example:
+        [
+          {"type": "transfer", "from": "Delhi", "to": "Puri", ...},
+          {"type": "city_flow", "city": "Puri", "pois": [...]},
+          {"type": "transfer", "from": "Puri", "to": "Konark", ...},
+          {"type": "city_flow", "city": "Konark", "pois": [...]}
         ]
+        """
+        display_sequence: List[Dict[str, Any]] = []
+        used_leg_indexes = set()
 
-        if not coords:
-            return None
+        for block in ordered_city_blocks:
+            city = block.get("city")
 
-        avg_lat = sum(lat for lat, _ in coords) / len(coords)
-        avg_lon = sum(lon for _, lon in coords) / len(coords)
+            matching_leg_index = None
+            matching_leg = None
 
-        return (avg_lat, avg_lon)
+            for index, leg in enumerate(inter_city_legs):
+                if index in used_leg_indexes:
+                    continue
+
+                if leg.get("to") == city:
+                    matching_leg_index = index
+                    matching_leg = leg
+                    break
+
+            if matching_leg is not None:
+                transport_data = matching_leg.get("transport_data") or {}
+
+                display_sequence.append(
+                    {
+                        "type": "transfer",
+                        "from": matching_leg.get("from"),
+                        "to": matching_leg.get("to"),
+                        "success": matching_leg.get("success"),
+                        "mode": transport_data.get("mode") or "driving-car",
+                        "distance_km": transport_data.get("distance_km"),
+                        "duration_hours": transport_data.get("duration_hours"),
+                        "duration_minutes": transport_data.get("duration_minutes"),
+                        "route_source": transport_data.get("route_source"),
+                        "note": self._transfer_note(
+                            from_city=matching_leg.get("from"),
+                            to_city=matching_leg.get("to"),
+                            transport_data=transport_data,
+                            success=matching_leg.get("success"),
+                            error=matching_leg.get("error"),
+                        ),
+                    }
+                )
+
+                used_leg_indexes.add(matching_leg_index)
+
+            pois = block.get("ordered_attractions") or []
+
+            display_sequence.append(
+                {
+                    "type": "city_flow",
+                    "city": city,
+                    "pois": pois,
+                    "poi_names": [poi.get("name") for poi in pois if poi.get("name")],
+                    "intra_city_distance_km": block.get("intra_city_distance_km", 0.0),
+                    "intra_city_route_success": block.get("intra_city_route_success", False),
+                    "note": self._city_flow_note(block),
+                }
+            )
+
+        return display_sequence
+
+    def _transfer_note(
+        self,
+        from_city: Optional[str],
+        to_city: Optional[str],
+        transport_data: Dict[str, Any],
+        success: bool,
+        error: Optional[str],
+    ) -> str:
+        if not success:
+            return (
+                f"Could not fetch a reliable road route from {from_city} to {to_city}. "
+                f"Reason: {error or 'unknown error'}."
+            )
+
+        distance_km = transport_data.get("distance_km")
+        duration_hours = transport_data.get("duration_hours")
+
+        if isinstance(distance_km, (int, float)) and distance_km >= 700:
+            return "Long-distance transfer. Consider flight or train instead of a full road journey."
+
+        if isinstance(duration_hours, (int, float)) and duration_hours >= 8:
+            return "Long road transfer. Keep this as a dedicated travel block."
+
+        if isinstance(duration_hours, (int, float)) and duration_hours >= 4:
+            return "Moderate-to-long road transfer. Start early and keep buffer time."
+
+        return "Local or short inter-city transfer."
+
+    def _city_flow_note(self, block: Dict[str, Any]) -> str:
+        poi_count = block.get("poi_count", 0)
+        route_success = block.get("intra_city_route_success", False)
+
+        if poi_count == 0:
+            return "No reliable POI coordinates were available for local ordering."
+
+        if route_success:
+            return "POIs are ordered using route optimization where coordinate data was available."
+
+        return "POIs are listed in available ranked order; route optimization was not fully available."
+
+    # ------------------------------------------------------------------ #
+    # Single-city / legacy flow
+    # ------------------------------------------------------------------ #
 
     def _fetch_single_leg(self, agent_input: AgentInput) -> AgentOutput:
         if not agent_input.source:
@@ -1258,17 +2015,131 @@ class TransportAgent(BaseAgent):
                 },
             )
 
+        compact_transport_data = self._compact_transport_data(response.data)
+
+        display_sequence = [
+            {
+                "type": "transfer",
+                "from": agent_input.source,
+                "to": agent_input.destination,
+                "success": True,
+                "mode": compact_transport_data.get("mode") or "driving-car",
+                "distance_km": compact_transport_data.get("distance_km"),
+                "duration_hours": compact_transport_data.get("duration_hours"),
+                "duration_minutes": compact_transport_data.get("duration_minutes"),
+                "route_source": compact_transport_data.get("route_source"),
+                "note": self._transfer_note(
+                    from_city=agent_input.source,
+                    to_city=agent_input.destination,
+                    transport_data=compact_transport_data,
+                    success=True,
+                    error=None,
+                ),
+            }
+        ]
+
         return self.success_response(
             data={
                 "mode": "single_leg",
                 "source": agent_input.source,
                 "destination": agent_input.destination,
-                "raw_transport_data": response.data,
+                "raw_transport_data": compact_transport_data,
+                "display_sequence": display_sequence,
                 "raw_mcp_response": response.raw_response,
             },
-            message="Raw transport data fetched successfully.",
+            message="Transport data fetched successfully.",
         )
 
+    # ------------------------------------------------------------------ #
+    # Helpers
+    # ------------------------------------------------------------------ #
+
+    def _compact_transport_data(self, transport_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        if not isinstance(transport_data, dict):
+            return {}
+
+        distance_km = (
+            transport_data.get("distance_km")
+            or transport_data.get("distance")
+            or transport_data.get("estimated_distance_km")
+        )
+
+        duration_hours = (
+            transport_data.get("duration_hours")
+            or transport_data.get("duration")
+            or transport_data.get("estimated_duration_hours")
+        )
+
+        duration_minutes = transport_data.get("duration_minutes")
+
+        if duration_minutes is None and isinstance(duration_hours, (int, float)):
+            duration_minutes = round(duration_hours * 60)
+
+        return {
+            "source": transport_data.get("source"),
+            "destination": transport_data.get("destination"),
+            "mode": transport_data.get("mode") or "driving-car",
+            "distance_km": self._round_number(distance_km),
+            "duration_hours": self._round_number(duration_hours),
+            "duration_minutes": self._round_number(duration_minutes),
+            "route_source": (
+                transport_data.get("route_source")
+                or transport_data.get("source_api")
+                or transport_data.get("provider")
+                or "transport_service"
+            ),
+            "note": transport_data.get("note"),
+            "raw_summary": transport_data.get("summary"),
+        }
+
+    def _compact_pois(self, pois: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        compact = []
+
+        for poi in pois:
+            if not isinstance(poi, dict):
+                continue
+
+            name = poi.get("name")
+
+            if not name:
+                continue
+
+            compact.append(
+                {
+                    "name": name,
+                    "categories": poi.get("categories") or poi.get("category") or [],
+                    "formatted_address": poi.get("formatted_address"),
+                    "latitude": poi.get("latitude"),
+                    "longitude": poi.get("longitude"),
+                    "distance_meters": poi.get("distance_meters") or poi.get("distance"),
+                    "source": poi.get("source"),
+                }
+            )
+
+        return compact
+
+    @staticmethod
+    def _centroid(places: List[Dict[str, Any]]):
+        coords = [
+            (place["latitude"], place["longitude"])
+            for place in places
+            if place.get("latitude") is not None and place.get("longitude") is not None
+        ]
+
+        if not coords:
+            return None
+
+        avg_lat = sum(lat for lat, _ in coords) / len(coords)
+        avg_lon = sum(lon for _, lon in coords) / len(coords)
+
+        return avg_lat, avg_lon
+
+    @staticmethod
+    def _round_number(value: Any):
+        if isinstance(value, float):
+            return round(value, 2)
+
+        return value
 ```
 
 ---
@@ -1355,7 +2226,8 @@ from dataclasses import dataclass
 from dotenv import load_dotenv
 
 load_dotenv()
-
+from typing import Optional
+from pydantic_settings import BaseSettings
 
 def str_to_bool(value: str, default: bool = True) -> bool:
     if value is None:
@@ -1424,6 +2296,22 @@ class NetworkSettings:
     )
     request_timeout: int = int(os.getenv("REQUEST_TIMEOUT", "30"))
 
+class RedisSettings(BaseSettings):
+    redis_enabled: bool = False
+    redis_url: Optional[str] = None
+
+    redis_ttl_seconds: int = 86400
+    redis_namespace: str = "trip_memory"
+
+    redis_socket_timeout: int = 10
+    redis_socket_connect_timeout: int = 10
+
+    class Config:
+        env_file = ".env"
+        extra = "ignore"
+
+
+redis_settings = RedisSettings()
 
 app_settings = AppSettings()
 mcp_settings = MCPSettings()
@@ -2128,11 +3016,320 @@ if __name__ == "__main__":
 
 ---
 
+## File: `memory/redis_trip_memory.py`
+
+```py
+import copy
+import json
+import uuid
+from typing import Any, Dict, Optional
+
+import redis
+
+from config.settings import redis_settings
+
+
+DEFAULT_TRIP_MEMORY = {
+    "request_memory": {
+        "source": None,
+        "destination": None,
+        "days": None,
+        "month": None,
+        "budget": None,
+        "travelers": None,
+        "interests": [],
+    },
+    "planning_memory": {
+        "selected_cities": [],
+        "dropped_cities": [],
+        "replan_count": 0,
+        "last_feasible": None,
+    },
+    "response_memory": {
+        "last_final_response": None,
+        "last_summary": None,
+    },
+    "conversation_history": [],
+}
+
+
+class RedisTripMemory:
+    """
+    Redis-backed short-term trip memory.
+
+    Redis is only used by app/orchestrator layer.
+    Agents should not directly read/write Redis.
+    """
+
+    def __init__(self):
+        self.enabled = redis_settings.redis_enabled
+        self.redis_url = redis_settings.redis_url
+        self.ttl_seconds = redis_settings.redis_ttl_seconds
+        self.namespace = redis_settings.redis_namespace
+        self.client = None
+
+        if not self.enabled:
+            print("[RedisTripMemory] Disabled by settings.")
+            return
+
+        if not self.redis_url:
+            print("[RedisTripMemory] REDIS_URL missing. Memory disabled.")
+            self.enabled = False
+            return
+
+        try:
+            self.client = redis.Redis.from_url(
+                self.redis_url,
+                decode_responses=True,
+                socket_timeout=redis_settings.redis_socket_timeout,
+                socket_connect_timeout=redis_settings.redis_socket_connect_timeout,
+                protocol=2,
+            )
+            self.client.ping()
+            print("[RedisTripMemory] Connected to Redis successfully.")
+        except Exception as e:
+            print("[RedisTripMemory] Redis unavailable. Memory disabled.")
+            print(type(e).__name__, str(e))
+            self.client = None
+            self.enabled = False
+
+    def create_session_id(self) -> str:
+        return str(uuid.uuid4())
+
+    def default_memory(self) -> Dict[str, Any]:
+        return copy.deepcopy(DEFAULT_TRIP_MEMORY)
+
+    def _key(self, session_id: str) -> str:
+        return f"{self.namespace}:{session_id}"
+
+    def load(self, session_id: Optional[str]) -> Dict[str, Any]:
+        if not session_id:
+            return self.default_memory()
+
+        if not self.enabled or not self.client:
+            return self.default_memory()
+
+        raw = self.client.get(self._key(session_id))
+
+        if not raw:
+            return self.default_memory()
+
+        try:
+            return self._normalize_memory(json.loads(raw))
+        except Exception:
+            return self.default_memory()
+
+    def save(self, session_id: Optional[str], memory: Dict[str, Any]) -> None:
+        if not session_id:
+            return
+
+        if not self.enabled or not self.client:
+            return
+
+        normalized = self._normalize_memory(memory)
+
+        self.client.setex(
+            self._key(session_id),
+            self.ttl_seconds,
+            json.dumps(normalized, ensure_ascii=False),
+        )
+
+    def clear(self, session_id: Optional[str]) -> None:
+        if not session_id:
+            return
+
+        if not self.enabled or not self.client:
+            return
+
+        self.client.delete(self._key(session_id))
+
+    def append_turn(
+        self,
+        session_id: Optional[str],
+        role: str,
+        content: str,
+        max_turns: int = 8,
+    ) -> Dict[str, Any]:
+        memory = self.load(session_id)
+
+        history = memory.get("conversation_history") or []
+        history.append(
+            {
+                "role": role,
+                "content": content,
+            }
+        )
+
+        memory["conversation_history"] = history[-max_turns:]
+        self.save(session_id, memory)
+
+        return memory
+
+    def merge_memory_into_request(
+        self,
+        memory: Dict[str, Any],
+        current_request: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        request_memory = memory.get("request_memory") or {}
+        merged = copy.deepcopy(request_memory)
+
+        for key, value in (current_request or {}).items():
+            if self._is_meaningful(value):
+                merged[key] = value
+
+        return merged
+
+    def update_from_state(
+        self,
+        session_id: Optional[str],
+        state: Dict[str, Any],
+        final_response: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        memory = self.load(session_id)
+
+        request = state.get("request") or {}
+
+        memory["request_memory"] = self._merge_request_memory(
+            old_memory=memory.get("request_memory") or {},
+            current_request=request,
+        )
+
+        memory["planning_memory"] = {
+            "selected_cities": state.get("selected_cities") or [],
+            "dropped_cities": self._extract_dropped_cities(state),
+            "replan_count": state.get("replan_count", 0),
+            "last_feasible": state.get("feasible"),
+        }
+
+        memory["response_memory"] = {
+            "last_final_response": final_response or state.get("final_response"),
+            "last_summary": {
+                "selected_cities": state.get("selected_cities") or [],
+                "feasible": state.get("feasible"),
+                "travel_sequence": state.get("travel_sequence"),
+            },
+        }
+
+        self.save(session_id, memory)
+        return memory
+
+    def _merge_request_memory(
+        self,
+        old_memory: Dict[str, Any],
+        current_request: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        merged = copy.deepcopy(old_memory or {})
+
+        fields = [
+            "source",
+            "destination",
+            "days",
+            "month",
+            "budget",
+            "travelers",
+            "interests",
+        ]
+
+        for field in fields:
+            if field not in current_request:
+                continue
+
+            value = current_request.get(field)
+
+            if self._is_meaningful(value):
+                merged[field] = value
+
+        return merged
+
+    def _normalize_memory(self, memory: Dict[str, Any]) -> Dict[str, Any]:
+        default = self.default_memory()
+
+        if not isinstance(memory, dict):
+            return default
+
+        for key, value in default.items():
+            if key not in memory:
+                memory[key] = copy.deepcopy(value)
+
+        request_memory = memory.get("request_memory") or {}
+
+        # Remove old unsupported keys saved in Redis, such as travel_style.
+        allowed_request_fields = set(default["request_memory"].keys())
+        request_memory = {
+            key: value
+            for key, value in request_memory.items()
+            if key in allowed_request_fields
+        }
+
+        memory["request_memory"] = {
+            **default["request_memory"],
+            **request_memory,
+        }
+
+        memory["planning_memory"] = {
+            **default["planning_memory"],
+            **(memory.get("planning_memory") or {}),
+        }
+
+        memory["response_memory"] = {
+            **default["response_memory"],
+            **(memory.get("response_memory") or {}),
+        }
+
+        if not isinstance(memory.get("conversation_history"), list):
+            memory["conversation_history"] = []
+
+        memory["conversation_history"] = memory["conversation_history"][-8:]
+
+        return memory
+
+    def _extract_dropped_cities(self, state: Dict[str, Any]):
+        directives = state.get("replan_directives") or []
+        dropped = []
+
+        for directive in directives:
+            if not isinstance(directive, dict):
+                continue
+
+            city = directive.get("drop_city") or directive.get("city")
+
+            if city:
+                dropped.append(city)
+
+        return dropped
+
+    def _is_meaningful(self, value: Any) -> bool:
+        if value is None:
+            return False
+
+        if isinstance(value, str) and not value.strip():
+            return False
+
+        if isinstance(value, list) and len(value) == 0:
+            return False
+
+        if isinstance(value, dict) and len(value) == 0:
+            return False
+
+        return True
+```
+
+---
+
+## File: `memory/__init__.py`
+
+```py
+
+```
+
+---
+
 ## File: `orchestrator/final_response_composer.py`
 
 ```py
 import html
 import json
+import re
 from typing import Any, Dict, List
 
 import google.generativeai as genai
@@ -2142,14 +3339,121 @@ from schemas.trip_schema import TripState
 
 
 class FinalResponseComposer:
-    """Turns a finished ``TripState`` into the user-facing plan.
-
-    By the time this runs, destination hierarchy has already been resolved
-    structurally by the graph (region -> city recommendations -> user
-    selection happens before ``compose`` is ever reached), so this composer
-    always writes a concrete, city-grouped itinerary rather than branching on
-    destination scope.
     """
+    Turns a completed TripState into the final user-facing Markdown response.
+
+    Important:
+    - TransportAgent owns route/sequence construction.
+    - Composer only renders the prepared travel_sequence/display_sequence.
+    """
+
+    STRONG_ATTRACTION_TERMS = [
+        "tourism",
+        "tourism.attraction",
+        "tourism.sights",
+        "tourism.information",
+        "entertainment.museum",
+        "museum",
+        "heritage",
+        "historic",
+        "historical",
+        "monument",
+        "memorial",
+        "castle",
+        "fort",
+        "palace",
+        "archaeological",
+        "religion",
+        "temple",
+        "church",
+        "mosque",
+        "natural",
+        "natural.water",
+        "natural.mountain",
+        "natural.forest",
+        "natural.beach",
+        "beach",
+        "lake",
+        "waterfall",
+        "park",
+        "garden",
+        "viewpoint",
+        "zoo",
+        "aquarium",
+        "leisure.park",
+        "validated_landmark",
+    ]
+
+    WEAK_OR_NON_ATTRACTION_TERMS = [
+        "catering",
+        "restaurant",
+        "cafe",
+        "coffee",
+        "bar",
+        "pub",
+        "fast_food",
+        "food_court",
+        "accommodation",
+        "hotel",
+        "hostel",
+        "guest_house",
+        "apartment",
+        "resort",
+        "commercial",
+        "shop",
+        "shopping",
+        "marketplace",
+        "supermarket",
+        "mall",
+        "book",
+        "books",
+        "bookstore",
+        "office",
+        "bank",
+        "atm",
+        "street",
+        "road",
+        "highway",
+        "residential",
+        "building",
+        "service",
+        "healthcare",
+        "hospital",
+        "pharmacy",
+        "education",
+        "school",
+        "college",
+        "university",
+        "parking",
+        "fuel",
+        "transport",
+        "bus",
+        "railway",
+        "airport",
+    ]
+
+    WEAK_NAME_HINTS = [
+        "road",
+        "street",
+        "rasta",
+        "marg",
+        "path",
+        "lane",
+        "hotel",
+        "restaurant",
+        "cafe",
+        "coffee",
+        "bhojnalaya",
+        "dhaba",
+        "bar",
+        "pub",
+        "book",
+        "pustak",
+        "store",
+        "shop",
+        "bank",
+        "atm",
+    ]
 
     def __init__(self):
         self.model = None
@@ -2174,7 +3478,7 @@ class FinalResponseComposer:
             response = self.model.generate_content(
                 prompt,
                 generation_config={
-                    "temperature": 0.25,
+                    "temperature": 0.18,
                     "top_p": 0.8,
                     "top_k": 40,
                 },
@@ -2192,7 +3496,7 @@ class FinalResponseComposer:
 
             return {
                 "success": True,
-                "response": html.unescape(text),
+                "response": self._clean_final_response(text),
                 "input_payload": compact_payload,
             }
 
@@ -2225,18 +3529,20 @@ class FinalResponseComposer:
 
         for city, data in city_attractions.items():
             places = (data or {}).get("ranked_places") or (data or {}).get("places") or []
-            filtered = self._filter_high_quality_places(places)
+            filtered_places = self._filter_high_quality_places(places)
 
             compact_cities[city] = {
-                "places_available": len(filtered) > 0,
-                "poi_quality": "usable" if len(filtered) >= 3 else "weak",
-                "places": filtered[:8],
+                "places_available": len(filtered_places) > 0,
+                "poi_quality": "usable" if len(filtered_places) >= 3 else "weak",
+                "usable_place_count": len(filtered_places),
+                "places": filtered_places[:8],
             }
 
         climate_by_city = self._safe_get(agent_results, ["climate_agent", "data", "by_city"]) or {}
         hotel_by_city = self._safe_get(agent_results, ["hotel_agent", "data", "by_city"]) or {}
         itinerary_result = self._safe_get(agent_results, ["itinerary_agent", "data"]) or {}
         budget_result = self._safe_get(agent_results, ["budget_agent", "data"]) or {}
+        transport_result = self._safe_get(agent_results, ["transport_agent", "data"]) or {}
 
         compact_climate = {
             city: self._safe_get(result, ["data", "raw_climate_data"])
@@ -2248,23 +3554,23 @@ class FinalResponseComposer:
             for city, result in hotel_by_city.items()
         }
 
+        prepared_travel_sequence = payload.get("travel_sequence") or transport_result
+
         return {
             "request": request,
             "selected_cities": payload.get("selected_cities", []),
             "city_attractions": compact_cities,
             "climate_by_city": compact_climate,
             "hotel_by_city": compact_hotel,
-            "travel_sequence": payload.get("travel_sequence"),
+            "travel_sequence": prepared_travel_sequence,
             "itinerary_skeleton": itinerary_result,
             "budget_result": budget_result,
             "feasible": payload.get("feasible"),
             "replan_directives": payload.get("replan_directives", []),
             "errors": payload.get("errors", []),
             "composer_instruction": (
-                "Use named POIs for a city only if that city's poi_quality is usable. "
-                "If poi_quality is weak for a city, describe that city's day(s) at a high level "
-                "using destination, interests, climate, transport, hotel, and budget context instead "
-                "of inventing place names."
+                "Render travel_sequence.display_sequence exactly as the prepared route flow. "
+                "Do not build route sequence yourself. Do not invent distances or local POI order."
             ),
         }
 
@@ -2272,43 +3578,8 @@ class FinalResponseComposer:
         if not places:
             return []
 
-        preferred_category_terms = [
-            "tourism",
-            "attraction",
-            "natural",
-            "beach",
-            "leisure",
-            "heritage",
-            "museum",
-            "park",
-            "viewpoint",
-            "zoo",
-            "garden",
-            "waterfall",
-            "fort",
-            "palace",
-            "temple",
-            "church",
-            "monument",
-        ]
-
-        weak_or_non_itinerary_terms = [
-            "catering",
-            "restaurant",
-            "cafe",
-            "bar",
-            "pub",
-            "accommodation",
-            "hotel",
-            "hostel",
-            "guest_house",
-            "apartment",
-            "commercial",
-            "bank",
-            "office",
-        ]
-
         filtered = []
+        seen_names = set()
 
         for item in places:
             if not isinstance(item, dict):
@@ -2319,32 +3590,69 @@ class FinalResponseComposer:
             if not name:
                 continue
 
-            categories = item.get("category") or item.get("categories") or []
+            normalized_name = name.lower().strip()
+
+            if normalized_name in seen_names:
+                continue
+
+            if self._looks_like_weak_name(normalized_name):
+                continue
+
+            categories = (
+                item.get("categories")
+                or item.get("category")
+                or item.get("kinds")
+                or []
+            )
 
             if isinstance(categories, str):
                 categories = [categories]
 
             category_text = " ".join(str(category).lower() for category in categories)
 
-            has_preferred = any(term in category_text for term in preferred_category_terms)
-            has_weak = any(term in category_text for term in weak_or_non_itinerary_terms)
-
-            if has_weak and not has_preferred:
+            if self._has_weak_category(category_text):
                 continue
 
-            if not has_preferred:
+            if not self._has_strong_attraction_category(category_text):
                 continue
+
+            seen_names.add(normalized_name)
 
             filtered.append(
                 {
                     "name": name,
-                    "category": categories,
-                    "formatted_address": self._clean_text(item.get("formatted_address")),
-                    "distance_meters": item.get("distance_meters"),
+                    "categories": categories,
+                    "formatted_address": self._clean_text(
+                        item.get("formatted_address")
+                        or item.get("address")
+                        or item.get("formatted")
+                    ),
+                    "distance_meters": item.get("distance_meters") or item.get("distance"),
+                    "latitude": item.get("latitude"),
+                    "longitude": item.get("longitude"),
+                    "source": item.get("source") or "places_service",
                 }
             )
 
         return filtered
+
+    def _has_strong_attraction_category(self, category_text: str) -> bool:
+        if not category_text:
+            return False
+
+        return any(term in category_text for term in self.STRONG_ATTRACTION_TERMS)
+
+    def _has_weak_category(self, category_text: str) -> bool:
+        if not category_text:
+            return False
+
+        return any(term in category_text for term in self.WEAK_OR_NON_ATTRACTION_TERMS)
+
+    def _looks_like_weak_name(self, normalized_name: str) -> bool:
+        if not normalized_name:
+            return True
+
+        return any(hint in normalized_name for hint in self.WEAK_NAME_HINTS)
 
     def _safe_get(self, data: Dict[str, Any], path: list, default=None):
         current = data
@@ -2367,44 +3675,78 @@ class FinalResponseComposer:
         if not isinstance(value, str):
             return value
 
-        return html.unescape(value).strip()
+        value = html.unescape(value)
+        value = re.sub(r"\s+", " ", value)
+        return value.strip()
+
+    def _clean_final_response(self, text: str) -> str:
+        text = html.unescape(text)
+        text = text.replace("\u00a0", " ")
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+
+        text = re.sub(r"([a-z])It ", r"\1. It ", text)
+        text = re.sub(r"([a-z])This ", r"\1. This ", text)
+        text = re.sub(r"([a-z])Please ", r"\1. Please ", text)
+
+        return text.strip()
 
     def _build_prompt(self, payload: Dict[str, Any]) -> str:
         return f"""
 You are a professional AI trip planning assistant.
 
-Your job is to compose the final user-facing travel response using structured outputs from multiple agents, covering one or more cities.
+Your job:
+Compose the final user-facing travel response using structured outputs from trip-planning components.
 
-Architecture rule:
-- Agents provide raw facts.
-- You generate final reasoning, advice, and itinerary.
-- Do not expose internal JSON or agent names.
+Architecture rules:
+- Components provide raw facts.
+- You generate the final written response.
+- Do not expose internal JSON.
+- Do not mention internal component names.
+- Do not invent exact transport distances, hotel names, or attraction names.
 
-General rules:
-1. Do not invent exact transport numbers. Use travel_sequence data only if present.
-2. Do not invent exact hotel names if hotel POIs are missing for a city.
-3. Do not blindly use restaurant, cafe, hotel, bank, street, statue, office, or random local POI names as main attractions.
-4. For any city where poi_quality is "weak", do not mention that city's POI names.
-5. Where POIs are weak, create a high-level plan for that city's days based on:
-   - the city itself
-   - user interests
-   - that city's climate data
-   - transport/travel data
-   - hotel stay signals
-   - budget estimate
-6. Use raw climate data (per city) to generate practical climate-aware advice.
-7. Use travel_sequence to describe the order attractions and cities should be visited in, and inter-city legs (distance/duration) where present.
-8. Use hotel data (per city) only as accommodation guidance. If hotel POIs are missing for a city, suggest checking booking platforms for that city.
-9. Budget estimate is rough. Make that clear.
-10. If "feasible" is false, include a short, honest note that the requested days may be tight for the chosen cities, referencing replan_directives if present, without being alarmist.
-11. Do not output HTML entities like &amp;.
-12. Keep the response concise, polished, and useful.
-13. Group the itinerary by city, in the order given by travel_sequence/selected_cities, with day numbers continuing across cities (do not restart at Day 1 for each city).
+CRITICAL TRAVEL SEQUENCE RULES:
+1. Use travel_sequence.display_sequence as the source of truth.
+2. Do not construct or infer route sequence yourself.
+3. Do not invent missing distances or durations.
+4. Render each transfer in display_sequence.
+5. Render each city_flow in display_sequence.
+6. If city_flow has poi_names, include those POIs as the local movement order.
+7. If city_flow has no POIs, write a high-level local flow only.
+8. For long transfers, mention that they should be treated as dedicated travel blocks.
+9. Do not list only city-to-city transfers if city_flow data is available.
+
+ATTRACTION RULES:
+10. Use named attractions only from structured city_attractions or travel_sequence city_flow.
+11. Never use restaurants, cafes, hotels, roads, streets, bookstores, shops, banks, offices, or random commercial POIs as attractions.
+12. Do not invent famous attractions missing from the structured context.
+
+CLIMATE RULES:
+13. Use climate_by_city for practical advice.
+14. Day-wise itinerary must reflect climate advice.
+15. For hot or humid months, schedule outdoor visits early morning/evening and midday rest/indoor activities.
+
+HOTEL RULES:
+16. Use hotel_by_city for stay-area guidance.
+17. Do not invent specific hotel names.
+18. If hotel data is limited, suggest areas and stay types.
+
+BUDGET RULES:
+19. Budget is a rough estimate. Say that clearly.
+20. If feasible is false, include a short feasibility warning.
+21. If replan_directives exist, explain the adjustment naturally.
+
+STYLE RULES:
+22. Keep the answer polished, professional, concise, and useful.
+23. Use Markdown.
+24. Day numbers must continue across cities.
+25. Do not output HTML entities like &amp;.
+26. Do not include internal field names like poi_quality, raw_climate_data, or agent_results.
 
 Structured planning context:
 {json.dumps(payload, indent=2, ensure_ascii=False)}
 
-Output format (Markdown):
+Output format:
 
 ## Trip Summary
 
@@ -2414,13 +3756,12 @@ Output format (Markdown):
 
 ## Stay Suggestions
 
-## Day-Wise Itinerary (grouped by city)
+## Day-Wise Itinerary
 
 ## Budget Snapshot
 
 ## Notes
 """
-
 ```
 
 ---
@@ -3072,8 +4413,8 @@ Return JSON exactly in this structure:
 ## File: `orchestrator/nodes.py`
 
 ```py
-from dataclasses import asdict
-from typing import Any, Dict, List
+from dataclasses import asdict, fields
+from typing import Any, Dict
 
 from langgraph.types import interrupt
 
@@ -3102,10 +4443,6 @@ from agents_mcp.itinerary_agent import ItineraryAgent
 from agents_mcp.budget_agent import BudgetAgent
 
 
-# Shared singletons. LangGraph nodes are plain functions, so the stateful
-# collaborators they need (the planner brain, agent instances, the intent
-# parser, the composer) live at module scope and are imported by
-# ``trip_graph.py`` to wire the graph.
 intent_analyzer = IntentAnalyzer()
 planner_agent = PlannerAgent()
 final_response_composer = FinalResponseComposer()
@@ -3131,11 +4468,36 @@ def _record_result(state: TripState, agent_name: str, result: AgentOutput) -> No
         state["errors"] = errors
 
 
+def _sanitize_request_dict(request_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Remove fields not accepted by TripRequest.
+
+    This prevents Redis memory keys or future extra fields from breaking:
+    TripRequest(**request_dict)
+    """
+
+    allowed_fields = {field.name for field in fields(TripRequest)}
+
+    return {
+        key: value
+        for key, value in (request_dict or {}).items()
+        if key in allowed_fields
+    }
+
+
 def _request_from_state(state: TripState) -> TripRequest:
-    return TripRequest(**state["request"])
+    request_dict = dict(state.get("request") or {})
+    sanitized_request = _sanitize_request_dict(request_dict)
+    state["request"] = sanitized_request
+
+    return TripRequest(**sanitized_request)
 
 
-def _base_agent_input(request: TripRequest, destination: Any = None, context: Dict[str, Any] = None) -> AgentInput:
+def _base_agent_input(
+    request: TripRequest,
+    destination: Any = None,
+    context: Dict[str, Any] = None,
+) -> AgentInput:
     return AgentInput(
         query=request.user_query,
         source=request.source,
@@ -3150,36 +4512,50 @@ def _base_agent_input(request: TripRequest, destination: Any = None, context: Di
 
 
 # ---------------------------------------------------------------------- #
-# Intake — parses the raw query into a TripRequest exactly once per thread.
-# If the facade has already seeded ``state["request"]`` (e.g. a merged
-# continuation request), intake leaves it untouched.
+# Intake
 # ---------------------------------------------------------------------- #
 
 def intake_node(state: TripState) -> TripState:
-    # ``intake`` only ever runs once, at the start of a brand-new graph
-    # invocation (never on resume, since ``Command(resume=...)`` continues
-    # execution from inside the paused node, not from the entry point). The
-    # facade may pre-seed ``request`` itself (e.g. a merged continuation
-    # request); when it hasn't, parse the raw query here.
+    """
+    Parse raw query only when request was not already seeded by TripOrchestrator.
+
+    Important for Redis memory:
+    - TripOrchestrator loads Redis memory.
+    - TripOrchestrator merges memory into request.
+    - This node must not overwrite state["request"] when it already exists.
+    """
+
     if not state.get("request"):
-        state["request"] = asdict(intent_analyzer.analyze(state.get("raw_user_query", "")))
+        parsed_request = asdict(
+            intent_analyzer.analyze(state.get("raw_user_query", ""))
+        )
+        state["request"] = _sanitize_request_dict(parsed_request)
+    else:
+        state["request"] = _sanitize_request_dict(state.get("request") or {})
+
+    state["trip_memory"] = state.get("trip_memory") or {}
+    state["conversation_history"] = state.get("conversation_history") or []
 
     state["agent_results"] = {}
     state["errors"] = []
-    state["conversation_history"] = state.get("conversation_history") or []
+
     state["phase"] = PHASE_INTAKE
     state["pending_clarification"] = None
     state["clarification_answers"] = {}
     state["asked_clarifications"] = []
     state["planned_agents"] = []
+
     state["destination_resolved"] = False
     state["selected_cities"] = []
     state["city_recommendations"] = []
     state["city_attractions"] = {}
+
     state["travel_sequence"] = None
     state["feasible"] = None
+
     state["replan_count"] = 0
     state["replan_directives"] = []
+
     state["final_response"] = None
     state["done"] = False
 
@@ -3187,7 +4563,7 @@ def intake_node(state: TripState) -> TripState:
 
 
 # ---------------------------------------------------------------------- #
-# Planner hub — the only node that decides where to go next.
+# Planner
 # ---------------------------------------------------------------------- #
 
 def planner_node(state: TripState) -> TripState:
@@ -3199,11 +4575,7 @@ def planner_node(state: TripState) -> TripState:
 
 
 # ---------------------------------------------------------------------- #
-# Clarification — generic, rule-driven. Re-derives the same question
-# deterministically before and after the interrupt (validated LangGraph
-# pattern: the node re-runs from the top on resume, so recomputation before
-# ``interrupt()`` is harmless and avoids reconstructing dataclasses from a
-# checkpointed dict).
+# Clarification
 # ---------------------------------------------------------------------- #
 
 def clarify_node(state: TripState) -> TripState:
@@ -3232,37 +4604,47 @@ def city_selection_node(state: TripState) -> TripState:
 
 
 def _reparse_request_after_clarification(state: TripState) -> None:
-    """Free-text clarification answers (e.g. the ambiguous-request rule)
-    only append raw text to the query. Re-run the intent parser on the
-    combined text so structured fields (destination, days, ...) actually
-    get filled in, then drop the stale failed destination result so the
-    planner retries it instead of looping back to ``clarify`` forever.
+    """
+    Free-text clarification answers may append raw text to the query.
+    Re-run parser and fill only missing structured fields.
+
+    This function does not erase Redis-merged fields.
+    It only fills missing values from the reparsed query.
     """
 
     request_dict = dict(state.get("request") or {})
     query = request_dict.get("user_query") or state.get("raw_user_query", "")
 
     reparsed = asdict(intent_analyzer.analyze(query))
+    reparsed = _sanitize_request_dict(reparsed)
 
     for field_name in (
-        "source", "destination", "month", "days", "budget",
-        "travelers", "interests", "destination_scope",
+        "source",
+        "destination",
+        "month",
+        "days",
+        "budget",
+        "travelers",
+        "interests",
+        "destination_scope",
     ):
         if not request_dict.get(field_name) and reparsed.get(field_name):
             request_dict[field_name] = reparsed[field_name]
 
-    state["request"] = request_dict
+    state["request"] = _sanitize_request_dict(request_dict)
 
     agent_results = dict(state.get("agent_results") or {})
 
-    if AGENT_DESTINATION in agent_results and not agent_results[AGENT_DESTINATION].get("success"):
+    if (
+        AGENT_DESTINATION in agent_results
+        and not agent_results[AGENT_DESTINATION].get("success")
+    ):
         agent_results.pop(AGENT_DESTINATION, None)
         state["agent_results"] = agent_results
 
 
 # ---------------------------------------------------------------------- #
-# Destination — scope resolution / city recommendation / no-destination
-# recommendation. Never fetches attractions itself.
+# Destination
 # ---------------------------------------------------------------------- #
 
 def destination_node(state: TripState) -> TripState:
@@ -3294,8 +4676,7 @@ def destination_node(state: TripState) -> TripState:
 
 
 # ---------------------------------------------------------------------- #
-# Attractions — fetched and ranked separately for each selected city.
-# Never fetches for the whole region.
+# Attractions
 # ---------------------------------------------------------------------- #
 
 def attractions_node(state: TripState) -> TripState:
@@ -3310,7 +4691,10 @@ def attractions_node(state: TripState) -> TripState:
         agent_input = _base_agent_input(
             request,
             destination=city,
-            context={"destination_mode": "fetch_attractions", "target_city": city},
+            context={
+                "destination_mode": "fetch_attractions",
+                "target_city": city,
+            },
         )
 
         result = AGENT_REGISTRY[AGENT_DESTINATION].run(agent_input)
@@ -3318,7 +4702,12 @@ def attractions_node(state: TripState) -> TripState:
         if result.success:
             city_attractions[city] = result.data
         else:
-            city_attractions[city] = {"ranked_places": [], "places": [], "error": result.error}
+            city_attractions[city] = {
+                "ranked_places": [],
+                "places": [],
+                "error": result.error,
+            }
+
             errors = list(state.get("errors") or [])
             errors.append(f"attractions:{city}: {result.error}")
             state["errors"] = errors
@@ -3329,12 +4718,12 @@ def attractions_node(state: TripState) -> TripState:
 
 
 # ---------------------------------------------------------------------- #
-# Climate / Hotel — single-destination agents, looped per selected city and
-# aggregated. The agents themselves are unchanged.
+# Climate / Hotel helper
 # ---------------------------------------------------------------------- #
 
 def _run_per_city(state: TripState, agent_name: str, extra_context_fn) -> TripState:
     request = _request_from_state(state)
+
     selected_cities = state.get("selected_cities") or (
         [request.destination] if request.destination else []
     )
@@ -3343,7 +4732,12 @@ def _run_per_city(state: TripState, agent_name: str, extra_context_fn) -> TripSt
     overall_success = True
 
     for city in selected_cities:
-        agent_input = _base_agent_input(request, destination=city, context=extra_context_fn(request))
+        agent_input = _base_agent_input(
+            request,
+            destination=city,
+            context=extra_context_fn(request),
+        )
+
         result = AGENT_REGISTRY[agent_name].run(agent_input)
         per_city[city] = asdict(result)
 
@@ -3361,6 +4755,7 @@ def _run_per_city(state: TripState, agent_name: str, extra_context_fn) -> TripSt
         ),
         error=None if overall_success else "One or more cities failed.",
     )
+
     _record_result(state, agent_name, output)
 
     return state
@@ -3375,15 +4770,20 @@ def climate_node(state: TripState) -> TripState:
 
 
 def hotel_node(state: TripState) -> TripState:
-    return _run_per_city(state, AGENT_HOTEL, lambda request: {})
+    return _run_per_city(
+        state,
+        AGENT_HOTEL,
+        lambda request: {},
+    )
 
 
 # ---------------------------------------------------------------------- #
-# Transport — intra-city order, city order, final travel sequence.
+# Transport
 # ---------------------------------------------------------------------- #
 
 def transport_node(state: TripState) -> TripState:
     request = _request_from_state(state)
+
     agent_input = _base_agent_input(
         request,
         context={
@@ -3402,11 +4802,12 @@ def transport_node(state: TripState) -> TripState:
 
 
 # ---------------------------------------------------------------------- #
-# Budget — feasibility only.
+# Budget
 # ---------------------------------------------------------------------- #
 
 def budget_node(state: TripState) -> TripState:
     request = _request_from_state(state)
+
     transport_result = (state.get("agent_results") or {}).get(AGENT_TRANSPORT) or {}
     inter_city_legs = (transport_result.get("data") or {}).get("inter_city_legs") or []
 
@@ -3428,11 +4829,12 @@ def budget_node(state: TripState) -> TripState:
 
 
 # ---------------------------------------------------------------------- #
-# Itinerary — multi-city skeleton.
+# Itinerary
 # ---------------------------------------------------------------------- #
 
 def itinerary_node(state: TripState) -> TripState:
     request = _request_from_state(state)
+
     agent_input = _base_agent_input(
         request,
         context={
@@ -3448,17 +4850,16 @@ def itinerary_node(state: TripState) -> TripState:
 
 
 # ---------------------------------------------------------------------- #
-# Replan — applies one directive and clears the agent results it invalidates.
+# Replan
 # ---------------------------------------------------------------------- #
 
 def replan_node(state: TripState) -> TripState:
     planner_agent.apply_replan_directive(state)
-
     return state
 
 
 # ---------------------------------------------------------------------- #
-# Compose — terminal node.
+# Compose
 # ---------------------------------------------------------------------- #
 
 def compose_node(state: TripState) -> TripState:
@@ -3477,7 +4878,6 @@ NODE_FUNCTIONS = {
     AGENT_ITINERARY: itinerary_node,
     AGENT_BUDGET: budget_node,
 }
-
 ```
 
 ---
@@ -4124,11 +5524,12 @@ trip_graph = build_trip_graph()
 
 ```py
 import uuid
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from typing import Any, Dict, Optional
 
 from langgraph.types import Command
 
+from memory.redis_trip_memory import RedisTripMemory
 from orchestrator.intent_analyzer import IntentAnalyzer
 from orchestrator.state_manager import StateManager
 from orchestrator.trip_graph import trip_graph
@@ -4136,21 +5537,25 @@ from schemas.trip_schema import TripRequest
 
 
 class TripOrchestrator:
-    """Public facade over the compiled trip-planning graph.
+    """
+    Public facade over the compiled trip-planning graph.
 
-    ``app_mcp.py`` only ever calls ``run()`` on this class; it never touches
-    LangGraph directly. A fresh ``thread_id`` is minted for every new user
-    turn so each turn starts from a clean ``TripState`` (cross-turn carryover
-    — e.g. "actually make it 5 days" — is handled explicitly via
-    ``StateManager``, not by relying on checkpoint replay). The *same*
-    ``thread_id`` is kept only across a clarification pause -> resume pair,
-    since that is a single logical turn split across two calls.
+    app_mcp.py only calls run() on this class; it never touches LangGraph directly.
+
+    Memory design:
+    - Redis is used only at orchestrator level.
+    - Agents do not directly read/write Redis.
+    - Redis memory is loaded into TripState as trip_memory.
+    - Current parsed request overrides Redis memory.
+    - Redis memory fills missing fields for follow-up queries.
     """
 
     def __init__(self):
         self.graph = trip_graph
         self.intent_analyzer = IntentAnalyzer()
         self.state_manager = StateManager()
+        self.memory_store = RedisTripMemory()
+
         self.thread_id = str(uuid.uuid4())
         self.last_completed_request: Optional[TripRequest] = None
         self.pending_clarification: Optional[Dict[str, Any]] = None
@@ -4160,23 +5565,39 @@ class TripOrchestrator:
         user_query: Optional[str] = None,
         answer: Any = None,
         debug: bool = False,
+        session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Advance the workflow by one turn.
-
-        Pass ``user_query`` for a normal chat message (new plan or free-text
-        clarification reply). Pass ``answer`` when the caller already knows a
-        clarification is pending and has a structured value to resume with
-        (e.g. a button click or a multi-select list of city ids) — the UI
-        decides the shape, ``PlannerAgent.merge_clarification_answer`` accepts
-        both scalars and ``{question_id: value}`` dicts.
         """
+        Advance the workflow by one turn.
+
+        Pass user_query for a normal chat message.
+        Pass answer for structured clarification replies.
+
+        session_id is used for Redis short-term memory.
+        """
+
+        trip_memory = self.memory_store.load(session_id)
+
         if self._is_paused():
             resume_value = answer if answer is not None else user_query
             result = self._invoke(Command(resume=resume_value))
         else:
-            result = self._start_new_plan(user_query or "")
+            result = self._start_new_plan(
+                user_query=user_query or "",
+                trip_memory=trip_memory,
+            )
 
-        return self._build_response(result, debug=debug)
+        response = self._build_response(result, debug=debug)
+
+        self._persist_memory_if_needed(
+            session_id=session_id,
+            result=result,
+            response=response,
+            user_query=user_query,
+            answer=answer,
+        )
+
+        return response
 
     # ------------------------------------------------------------------ #
     # Graph invocation
@@ -4189,8 +5610,40 @@ class TripOrchestrator:
         snapshot = self.graph.get_state(self._config())
         return bool(snapshot.next)
 
-    def _start_new_plan(self, user_query: str) -> Dict[str, Any]:
+    def _sanitize_request_dict(self, request_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Remove fields not accepted by TripRequest.
+
+        This prevents Redis memory keys like travel_style from breaking:
+        TripRequest(**request_dict)
+        """
+
+        allowed_fields = {field.name for field in fields(TripRequest)}
+
+        return {
+            key: value
+            for key, value in (request_dict or {}).items()
+            if key in allowed_fields
+        }
+
+    def _start_new_plan(
+        self,
+        user_query: str,
+        trip_memory: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Start a new planning turn.
+
+        Steps:
+        1. Parse current query.
+        2. Apply existing in-process replan merge.
+        3. Merge Redis memory into request.
+        4. Sanitize request for TripRequest schema.
+        5. Start LangGraph from a fresh thread.
+        """
+
         self.thread_id = str(uuid.uuid4())
+        self.pending_clarification = None
 
         parsed_request = self.intent_analyzer.analyze(user_query)
 
@@ -4203,9 +5656,20 @@ class TripOrchestrator:
                 current_request=parsed_request,
             )
 
+        current_request_dict = self._sanitize_request_dict(asdict(parsed_request))
+
+        merged_request_dict = self.memory_store.merge_memory_into_request(
+            memory=trip_memory,
+            current_request=current_request_dict,
+        )
+
+        merged_request_dict = self._sanitize_request_dict(merged_request_dict)
+
         initial_state = {
             "raw_user_query": user_query,
-            "request": asdict(parsed_request),
+            "request": merged_request_dict,
+            "trip_memory": trip_memory,
+            "conversation_history": trip_memory.get("conversation_history", []),
         }
 
         return self._invoke(initial_state)
@@ -4214,14 +5678,71 @@ class TripOrchestrator:
         result = self.graph.invoke(payload, self._config())
         interrupts = result.get("__interrupt__")
 
-        # A node's own writes just before it calls ``interrupt()`` are never
-        # visible here or via ``get_state`` while paused — only the exact
-        # payload passed into ``interrupt(...)`` is retrievable, via
-        # ``Interrupt.value``. That is why the clarification questions are
-        # read from here rather than from ``TripState["pending_clarification"]``.
+        # A node's writes just before interrupt() are not visible in result.
+        # Clarification payload must be read from Interrupt.value.
         self.pending_clarification = interrupts[0].value if interrupts else None
 
         return result
+
+    # ------------------------------------------------------------------ #
+    # Memory persistence
+    # ------------------------------------------------------------------ #
+
+    def _persist_memory_if_needed(
+        self,
+        session_id: Optional[str],
+        result: Dict[str, Any],
+        response: Dict[str, Any],
+        user_query: Optional[str],
+        answer: Any,
+    ) -> None:
+        """
+        Save Redis short-term memory only when a turn reaches a final response.
+
+        Do not update final trip memory during clarification pause,
+        because the graph state is not complete yet.
+        """
+
+        if not session_id:
+            return
+
+        if response.get("awaiting_clarification"):
+            if user_query:
+                self.memory_store.append_turn(
+                    session_id=session_id,
+                    role="user",
+                    content=user_query,
+                )
+            return
+
+        final_response_text = response.get("response")
+
+        self.memory_store.update_from_state(
+            session_id=session_id,
+            state=result,
+            final_response=final_response_text,
+        )
+
+        if user_query:
+            self.memory_store.append_turn(
+                session_id=session_id,
+                role="user",
+                content=user_query,
+            )
+
+        if answer is not None and not user_query:
+            self.memory_store.append_turn(
+                session_id=session_id,
+                role="user",
+                content=str(answer),
+            )
+
+        if final_response_text:
+            self.memory_store.append_turn(
+                session_id=session_id,
+                role="assistant",
+                content=final_response_text,
+            )
 
     # ------------------------------------------------------------------ #
     # Response shaping
@@ -4234,8 +5755,6 @@ class TripOrchestrator:
         return self._build_final_response(result, debug=debug)
 
     def _build_clarification_response(self, debug: bool) -> Dict[str, Any]:
-        # Fields committed by nodes that ran before the pause (intake,
-        # planner, any already-completed agents) ARE visible here.
         snapshot_values = self.graph.get_state(self._config()).values
 
         response = {
@@ -4251,7 +5770,7 @@ class TripOrchestrator:
         return response
 
     def _build_final_response(self, result: Dict[str, Any], debug: bool) -> Dict[str, Any]:
-        request = result.get("request") or {}
+        request = self._sanitize_request_dict(result.get("request") or {})
         final_response = result.get("final_response") or {}
 
         if result.get("done") and request:
@@ -4298,16 +5817,24 @@ class TripOrchestrator:
 
     def _completed_agents(self, result: Dict[str, Any]) -> list:
         agent_results = result.get("agent_results") or {}
-        return [name for name, agent_result in agent_results.items() if agent_result.get("success")]
+
+        return [
+            name
+            for name, agent_result in agent_results.items()
+            if agent_result.get("success")
+        ]
 
     def _failed_agents(self, result: Dict[str, Any]) -> list:
         agent_results = result.get("agent_results") or {}
+
         return [
-            {"agent": name, "error": agent_result.get("error")}
+            {
+                "agent": name,
+                "error": agent_result.get("error"),
+            }
             for name, agent_result in agent_results.items()
             if not agent_result.get("success")
         ]
-
 ```
 
 ---
@@ -4581,6 +6108,8 @@ class TripState(TypedDict, total=False):
     # --- Terminal ---
     final_response: Optional[Dict[str, Any]]
     done: bool
+    trip_memory: Dict[str, Any]
+    conversation_history: List[Dict[str, Any]]
 
 
 @dataclass
@@ -4905,19 +6434,39 @@ from typing import Any, Dict, List, Optional
 import google.generativeai as genai
 import requests
 
-from config.constants import SCOPE_CITY, SCOPE_STATE, SCOPE_COUNTRY, SCOPE_REGION, SCOPE_UNKNOWN
+from config.constants import (
+    SCOPE_CITY,
+    SCOPE_STATE,
+    SCOPE_COUNTRY,
+    SCOPE_REGION,
+    SCOPE_UNKNOWN,
+)
 from config.settings import api_settings, network_settings
 
 
-# Geoapify `result_type` values that unambiguously identify a single city/town.
-CITY_RESULT_TYPES = {"city", "town", "village", "suburb", "district", "municipality"}
-# Geoapify `result_type` values that identify a state/province-level area.
-STATE_RESULT_TYPES = {"state", "county", "province"}
-COUNTRY_RESULT_TYPES = {"country"}
+# ---------------------------------------------------------------------- #
+# Geoapify destination scope constants
+# ---------------------------------------------------------------------- #
 
-# Colloquial multi-state regions that Geoapify cannot geocode to a single
-# administrative boundary (e.g. "South India", "North East"). These are
-# recognized up front so classification does not depend on a weak geocode match.
+CITY_RESULT_TYPES = {
+    "city",
+    "town",
+    "village",
+    "suburb",
+    "district",
+    "municipality",
+}
+
+STATE_RESULT_TYPES = {
+    "state",
+    "county",
+    "province",
+}
+
+COUNTRY_RESULT_TYPES = {
+    "country",
+}
+
 KNOWN_REGION_KEYWORDS = [
     "south india",
     "north india",
@@ -4927,6 +6476,121 @@ KNOWN_REGION_KEYWORDS = [
     "east india",
     "west india",
     "central india",
+]
+
+
+# ---------------------------------------------------------------------- #
+# POI filtering constants
+# ---------------------------------------------------------------------- #
+
+STRONG_ATTRACTION_CATEGORY_TERMS = [
+    "tourism",
+    "tourism.attraction",
+    "tourism.sights",
+    "tourism.information",
+    "entertainment.museum",
+    "museum",
+    "heritage",
+    "historic",
+    "historical",
+    "monument",
+    "memorial",
+    "castle",
+    "fort",
+    "palace",
+    "archaeological",
+    "religion",
+    "temple",
+    "church",
+    "mosque",
+    "natural",
+    "natural.water",
+    "natural.mountain",
+    "natural.forest",
+    "natural.beach",
+    "beach",
+    "lake",
+    "waterfall",
+    "park",
+    "garden",
+    "viewpoint",
+    "zoo",
+    "aquarium",
+    "leisure.park",
+    "validated_landmark",
+]
+
+
+BLOCKED_POI_CATEGORY_TERMS = [
+    "catering",
+    "restaurant",
+    "cafe",
+    "coffee",
+    "bar",
+    "pub",
+    "fast_food",
+    "food_court",
+    "accommodation",
+    "hotel",
+    "hostel",
+    "guest_house",
+    "apartment",
+    "resort",
+    "commercial",
+    "shop",
+    "shopping",
+    "marketplace",
+    "supermarket",
+    "mall",
+    "book",
+    "books",
+    "bookstore",
+    "office",
+    "bank",
+    "atm",
+    "street",
+    "road",
+    "highway",
+    "residential",
+    "building",
+    "service",
+    "healthcare",
+    "hospital",
+    "pharmacy",
+    "education",
+    "school",
+    "college",
+    "university",
+    "parking",
+    "fuel",
+    "transport",
+    "bus",
+    "railway",
+    "airport",
+]
+
+
+BLOCKED_POI_NAME_HINTS = [
+    "road",
+    "street",
+    "rasta",
+    "marg",
+    "path",
+    "lane",
+    "hotel",
+    "restaurant",
+    "cafe",
+    "coffee",
+    "bhojnalaya",
+    "dhaba",
+    "bar",
+    "pub",
+    "book",
+    "pustak",
+    "store",
+    "shop",
+    "bank",
+    "atm",
 ]
 
 
@@ -4941,10 +6605,13 @@ class PlacesService:
         self.geoapify_places_url = "https://api.geoapify.com/v2/places"
 
         self.gemini_model = None
-
         if self.gemini_api_key:
             genai.configure(api_key=self.gemini_api_key)
-            self.gemini_model = genai.GenerativeModel("gemini-flash-lite-latest")
+            self.gemini_model = genai.GenerativeModel(api_settings.gemini_model)
+
+    # ------------------------------------------------------------------ #
+    # Destination recommendation when user has no fixed destination
+    # ------------------------------------------------------------------ #
 
     def recommend_destinations(
         self,
@@ -4961,85 +6628,285 @@ class PlacesService:
         if not self.gemini_model:
             return {
                 "success": False,
-                "error": "Gemini API key is missing. Destination recommendation requires Gemini.",
+                "error": "Gemini API key is required to recommend destinations from preference-only queries.",
                 "recommendations": [],
             }
 
-        candidates = self._generate_destination_candidates(
-            source=source,
-            interests=interests,
-            month=month,
-            budget=budget,
-            days=days,
-            travelers=travelers,
-            limit=limit,
-        )
+        prompt = f"""
+You are a destination recommendation engine for an Indian trip planning assistant.
 
-        if not candidates:
-            return {
-                "success": False,
-                "error": "No destination candidates generated.",
-                "recommendations": [],
-            }
+Return only valid JSON.
+Do not include markdown.
+Do not explain anything.
 
-        validated = []
+Task:
+Recommend suitable Indian city/town destinations for the user's trip preferences.
 
-        for candidate in candidates:
-            destination_name = self._clean_destination_name(candidate.get("destination"))
+Rules:
+1. Recommend concrete Indian cities/towns only.
+2. Do not recommend broad states/regions/countries.
+3. Do not recommend attractions, hotels, restaurants, cafes, roads, or markets as destinations.
+4. Prefer practical destinations based on source, month, interests, budget, days, and travelers.
+5. Each recommendation must include a short reason and match_score from 0 to 100.
+6. Return at most {limit} destinations.
 
-            if not destination_name:
-                continue
+Input:
+source: {source}
+interests: {json.dumps(interests, ensure_ascii=False)}
+month: {month}
+budget: {budget}
+days: {days}
+travelers: {travelers}
 
-            geo_data = self._geocode_location(destination_name)
+Return JSON exactly in this format:
+{{
+  "recommendations": [
+    {{
+      "destination": "City Name",
+      "state": "State Name",
+      "reason": "short reason",
+      "match_score": 85,
+      "best_for": ["heritage", "food"],
+      "budget_fit": "low|medium|high"
+    }}
+  ]
+}}
+"""
 
-            if not geo_data:
-                continue
-
-            validated.append(
-                {
-                    "destination": destination_name,
-                    "state_or_region": candidate.get("state_or_region"),
-                    "country": geo_data.get("country"),
-                    "formatted_address": geo_data.get("formatted"),
-                    "latitude": geo_data.get("lat"),
-                    "longitude": geo_data.get("lon"),
-                    "match_score": candidate.get("match_score"),
-                    "best_for": candidate.get("best_for", []),
-                    "reason": candidate.get("reason"),
-                    "ideal_days": candidate.get("ideal_days"),
-                    "budget_fit": candidate.get("budget_fit"),
-                    "travel_note": candidate.get("travel_note"),
-                    "source": source,
-                    "month": month,
-                    "budget": budget,
-                    "days": days,
-                    "travelers": travelers,
-                }
+        try:
+            response = self.gemini_model.generate_content(
+                prompt,
+                generation_config={
+                    "temperature": 0.25,
+                    "top_p": 0.8,
+                    "top_k": 40,
+                },
             )
 
-        if not validated:
+            text = getattr(response, "text", "").strip()
+            data = json.loads(self._extract_json(text))
+
+            recommendations = data.get("recommendations", [])
+            validated = self._validate_recommendation_candidates(
+                recommendations=recommendations,
+                limit=limit,
+            )
+
             return {
-                "success": False,
-                "error": "Destination candidates were generated but could not be validated using Geoapify.",
+                "success": True,
                 "source": source,
                 "interests": interests,
                 "month": month,
                 "budget": budget,
                 "days": days,
                 "travelers": travelers,
+                "recommendations": validated,
+                "recommendation_method": "gemini_validated_by_geoapify",
+            }
+
+        except Exception as e:
+            print("[PlacesService] Destination recommendation failed:")
+            print(type(e).__name__, str(e))
+            return {
+                "success": False,
+                "error": f"Destination recommendation failed: {type(e).__name__}: {str(e)}",
                 "recommendations": [],
             }
 
+    # ------------------------------------------------------------------ #
+    # Destination scope classification
+    # ------------------------------------------------------------------ #
+
+    def classify_destination(self, name: str) -> Dict[str, Any]:
+        if not name:
+            return {
+                "success": False,
+                "error": "Destination name is required for classification.",
+                "scope": SCOPE_UNKNOWN,
+            }
+
+        normalized_name = self._clean_text(name)
+        if not normalized_name:
+            return {
+                "success": False,
+                "error": "Destination name is empty after cleanup.",
+                "scope": SCOPE_UNKNOWN,
+            }
+
+        lowered = normalized_name.lower()
+
+        if any(keyword == lowered for keyword in KNOWN_REGION_KEYWORDS):
+            return {
+                "success": True,
+                "input": name,
+                "canonical_name": normalized_name.title(),
+                "scope": SCOPE_REGION,
+                "classification_method": "known_region_keyword",
+            }
+
+        geo_data = self._geocode_location(normalized_name)
+
+        if not geo_data:
+            return {
+                "success": False,
+                "error": f"Could not classify destination: {name}",
+                "scope": SCOPE_UNKNOWN,
+            }
+
+        result_type = str(geo_data.get("result_type") or "").lower()
+        canonical_name = (
+            geo_data.get("city")
+            or geo_data.get("state")
+            or geo_data.get("country")
+            or geo_data.get("name")
+            or normalized_name
+        )
+
+        if result_type in CITY_RESULT_TYPES:
+            scope = SCOPE_CITY
+        elif result_type in STATE_RESULT_TYPES:
+            scope = SCOPE_STATE
+        elif result_type in COUNTRY_RESULT_TYPES:
+            scope = SCOPE_COUNTRY
+        else:
+            scope = self._fallback_scope_from_geocode(geo_data)
+
         return {
             "success": True,
-            "source": source,
-            "interests": interests,
-            "month": month,
-            "budget": budget,
-            "days": days,
-            "travelers": travelers,
-            "recommendations": validated[:limit],
+            "input": name,
+            "canonical_name": canonical_name,
+            "scope": scope,
+            "result_type": result_type,
+            "location": geo_data,
+            "classification_method": "geoapify_geocode",
         }
+
+    def _fallback_scope_from_geocode(self, geo_data: Dict[str, Any]) -> str:
+        if geo_data.get("city"):
+            return SCOPE_CITY
+
+        if geo_data.get("state") and not geo_data.get("city"):
+            return SCOPE_STATE
+
+        if geo_data.get("country") and not geo_data.get("city") and not geo_data.get("state"):
+            return SCOPE_COUNTRY
+
+        return SCOPE_UNKNOWN
+
+    # ------------------------------------------------------------------ #
+    # City recommendations inside state/region/country
+    # ------------------------------------------------------------------ #
+
+    def recommend_cities_in_region(
+        self,
+        region: str,
+        interests: Optional[List[str]] = None,
+        days: Optional[int] = None,
+        budget: Optional[str] = None,
+        travelers: Optional[int] = None,
+        travel_style: Optional[str] = None,
+        limit: int = 6,
+    ) -> Dict[str, Any]:
+        interests = interests or []
+
+        if not region:
+            return {
+                "success": False,
+                "error": "Region is required to recommend cities.",
+                "recommendations": [],
+            }
+
+        if not self.gemini_model:
+            return {
+                "success": False,
+                "error": "Gemini API key is required to recommend cities inside a broad region.",
+                "recommendations": [],
+            }
+
+        prompt = f"""
+You are a city selection planner for an Indian trip planning assistant.
+
+Return only valid JSON.
+Do not include markdown.
+Do not explain anything.
+
+Task:
+Recommend concrete cities/towns inside the given broad destination/region.
+
+Rules:
+1. Recommend city/town names only.
+2. Do not recommend the broad region itself.
+3. Do not recommend attractions, restaurants, hotels, roads, or markets as cities.
+4. Consider trip duration, interests, budget, travelers, and travel style.
+5. Prefer realistic combinations for the number of days.
+6. Return at most {limit} cities.
+
+Input:
+region: {region}
+interests: {json.dumps(interests, ensure_ascii=False)}
+days: {days}
+budget: {budget}
+travelers: {travelers}
+travel_style: {travel_style}
+
+Return JSON exactly in this format:
+{{
+  "recommendations": [
+    {{
+      "destination": "City Name",
+      "state": "State Name",
+      "reason": "short reason",
+      "match_score": 90,
+      "best_for": ["heritage", "food"]
+    }}
+  ]
+}}
+"""
+
+        try:
+            response = self.gemini_model.generate_content(
+                prompt,
+                generation_config={
+                    "temperature": 0.2,
+                    "top_p": 0.8,
+                    "top_k": 40,
+                },
+            )
+
+            text = getattr(response, "text", "").strip()
+            data = json.loads(self._extract_json(text))
+
+            recommendations = data.get("recommendations", [])
+            validated = self._validate_city_candidates_inside_region(
+                region=region,
+                recommendations=recommendations,
+                limit=limit,
+            )
+
+            return {
+                "success": True,
+                "region": region,
+                "interests": interests,
+                "days": days,
+                "budget": budget,
+                "travelers": travelers,
+                "travel_style": travel_style,
+                "recommendations": validated,
+                "recommendation_method": "gemini_validated_by_geoapify",
+            }
+
+        except Exception as e:
+            print("[PlacesService] City recommendation inside region failed:")
+            print(type(e).__name__, str(e))
+            return {
+                "success": False,
+                "error": f"City recommendation failed: {type(e).__name__}: {str(e)}",
+                "recommendations": [],
+            }
+
+    # ------------------------------------------------------------------ #
+    # Popular places / attractions
+    # ------------------------------------------------------------------ #
 
     def get_popular_places(
         self,
@@ -5052,7 +6919,7 @@ class PlacesService:
         if not destination:
             return {
                 "success": False,
-                "error": "Destination is required.",
+                "error": "Destination is required for places lookup.",
                 "places": [],
             }
 
@@ -5065,310 +6932,323 @@ class PlacesService:
                 "places": [],
             }
 
-        lat = geo_data.get("lat")
-        lon = geo_data.get("lon")
+        categories = self._build_attraction_categories(interests)
 
-        categories = self._map_interests_to_geoapify_categories(interests)
-
-        places = self._fetch_places_near_location(
-            lat=lat,
-            lon=lon,
+        raw_places = self._fetch_geoapify_places(
+            latitude=geo_data.get("latitude"),
+            longitude=geo_data.get("longitude"),
             categories=categories,
-            limit=limit,
+            limit=max(limit * 4, 30),
         )
+
+        usable_places = self._filter_usable_attractions(raw_places)
+
+        landmark_fallback_used = False
+        landmark_candidates = []
+        validated_landmarks = []
+
+        if len(usable_places) < 3:
+            landmark_fallback_used = True
+            landmark_candidates = self._generate_landmark_candidates(
+                city=destination,
+                interests=interests,
+                limit=max(limit, 8),
+            )
+            validated_landmarks = self._validate_landmark_candidates(
+                city=destination,
+                city_location=geo_data,
+                candidates=landmark_candidates,
+                limit=limit,
+            )
+            usable_places = self._merge_places(
+                primary=usable_places,
+                secondary=validated_landmarks,
+                limit=limit,
+            )
+
+        usable_places = usable_places[:limit]
 
         return {
             "success": True,
             "destination": destination,
-            "formatted_address": geo_data.get("formatted"),
-            "latitude": lat,
-            "longitude": lon,
+            "location": geo_data,
             "interests": interests,
-            "places": places,
+            "categories_used": categories,
+            "places": usable_places,
+            "raw_place_count": len(raw_places),
+            "usable_place_count": len(usable_places),
+            "poi_quality": "usable" if len(usable_places) >= 3 else "weak",
+            "landmark_fallback_used": landmark_fallback_used,
+            "landmark_candidates": landmark_candidates,
+            "validated_landmark_count": len(validated_landmarks),
+            "note": (
+                "Strong sightseeing POIs are returned. Restaurants, cafes, hotels, roads, shops, "
+                "bookstores, and commercial POIs are filtered out. If normal Geoapify POIs are weak, "
+                "canonical landmark candidates are generated by Gemini and validated with Geoapify."
+            ),
         }
 
-    def classify_destination(self, name: str) -> Dict[str, Any]:
-        """Classify a destination name as a city, state, region or country.
-
-        Deterministic path: geocode via Geoapify and read its ``result_type``.
-        Falls back to Gemini only when geocoding fails or is ambiguous (e.g.
-        colloquial multi-state regions like "South India" that have no single
-        administrative boundary).
-        """
-        if not name:
-            return {
-                "success": False,
-                "error": "Destination name is required.",
-                "scope": SCOPE_UNKNOWN,
-            }
-
-        normalized = name.strip().lower()
-
-        if any(keyword in normalized for keyword in KNOWN_REGION_KEYWORDS):
-            return {
-                "success": True,
-                "scope": SCOPE_REGION,
-                "canonical_name": name.strip().title(),
-                "source": "keyword_match",
-            }
-
-        geo_data = self._geocode_location(name)
-
-        if not geo_data:
-            return self._classify_destination_with_gemini(name)
-
-        result_type = (geo_data.get("raw") or {}).get("result_type")
-        scope = self._map_result_type_to_scope(result_type)
-
-        if scope == SCOPE_UNKNOWN:
-            gemini_result = self._classify_destination_with_gemini(name)
-
-            if gemini_result.get("success"):
-                gemini_result.setdefault("latitude", geo_data.get("lat"))
-                gemini_result.setdefault("longitude", geo_data.get("lon"))
-                return gemini_result
-
-        return {
-            "success": True,
-            "scope": scope,
-            "canonical_name": geo_data.get("city") or name.strip().title(),
-            "state": geo_data.get("state"),
-            "country": geo_data.get("country"),
-            "latitude": geo_data.get("lat"),
-            "longitude": geo_data.get("lon"),
-            "source": "geoapify",
-        }
-
-    def _map_result_type_to_scope(self, result_type: Optional[str]) -> str:
-        if not result_type:
-            return SCOPE_UNKNOWN
-
-        if result_type in CITY_RESULT_TYPES:
-            return SCOPE_CITY
-
-        if result_type in STATE_RESULT_TYPES:
-            return SCOPE_STATE
-
-        if result_type in COUNTRY_RESULT_TYPES:
-            return SCOPE_COUNTRY
-
-        return SCOPE_UNKNOWN
-
-    def _classify_destination_with_gemini(self, name: str) -> Dict[str, Any]:
-        if not self.gemini_model:
-            return {
-                "success": False,
-                "error": "Could not classify destination and Gemini API key is missing.",
-                "scope": SCOPE_UNKNOWN,
-            }
-
-        prompt = f"""
-You are a geography classifier for India-focused trip planning.
-
-Return only valid JSON. Do not include markdown. Do not explain anything.
-
-Classify the following destination name into exactly one scope:
-- "city": a specific city or town (e.g. Jaipur, Ooty, Goa town)
-- "state": a single Indian state or union territory (e.g. Rajasthan, Kerala)
-- "region": a multi-state colloquial region (e.g. South India, North East, Rajasthan-Gujarat circuit)
-- "country": a whole country (e.g. India)
-
-Destination: {name}
-
-Return JSON exactly in this structure:
-{{
-  "scope": "city|state|region|country",
-  "canonical_name": "Cleaned display name"
-}}
-"""
-
-        try:
-            response = self.gemini_model.generate_content(
-                prompt,
-                generation_config={
-                    "temperature": 0.0,
-                    "top_p": 0.8,
-                    "top_k": 40,
-                },
-            )
-
-            text = getattr(response, "text", "").strip()
-
-            if not text:
-                return {
-                    "success": False,
-                    "error": "Gemini returned an empty destination classification.",
-                    "scope": SCOPE_UNKNOWN,
-                }
-
-            data = json.loads(self._extract_json(text))
-            scope = data.get("scope")
-
-            if scope not in {SCOPE_CITY, SCOPE_STATE, SCOPE_REGION, SCOPE_COUNTRY}:
-                scope = SCOPE_UNKNOWN
-
-            return {
-                "success": scope != SCOPE_UNKNOWN,
-                "scope": scope,
-                "canonical_name": data.get("canonical_name") or name.strip().title(),
-                "source": "gemini",
-            }
-
-        except Exception as e:
-            print("[PlacesService] Gemini destination classification failed:")
-            print(type(e).__name__, str(e))
-            return {
-                "success": False,
-                "error": f"Destination classification failed: {type(e).__name__}: {str(e)}",
-                "scope": SCOPE_UNKNOWN,
-            }
-
-    def recommend_cities_in_region(
-        self,
-        region: str,
-        interests: Optional[List[str]] = None,
-        days: Optional[int] = None,
-        budget: Optional[str] = None,
-        travelers: Optional[int] = None,
-        travel_style: Optional[str] = None,
-        limit: int = 6,
-    ) -> Dict[str, Any]:
-        """Recommend candidate cities inside a broad state/region/country.
-
-        Mirrors ``recommend_destinations`` (Gemini generates candidates,
-        Geoapify validates each one) but scoped to cities *within* the given
-        region rather than open-ended destinations across India.
-        """
+    def _build_attraction_categories(self, interests: Optional[List[str]]) -> List:
         interests = interests or []
 
-        if not region:
-            return {
-                "success": False,
-                "error": "Region is required.",
-                "recommendations": [],
-            }
+        base_categories = [
+            "tourism",
+            "tourism.attraction",
+            "tourism.sights",
+            "tourism.information",
+            "entertainment.museum",
+            "natural",
+            "natural.water",
+            "natural.beach",
+            "leisure.park",
+            "religion",
+        ]
 
-        if not self.gemini_model:
-            return {
-                "success": False,
-                "error": "Gemini API key is missing. City recommendation requires Gemini.",
-                "recommendations": [],
-            }
-
-        candidates = self._generate_city_candidates(
-            region=region,
-            interests=interests,
-            days=days,
-            budget=budget,
-            travelers=travelers,
-            travel_style=travel_style,
-            limit=limit,
-        )
-
-        if not candidates:
-            return {
-                "success": False,
-                "error": f"No candidate cities generated for '{region}'.",
-                "recommendations": [],
-            }
-
-        validated = []
-
-        for candidate in candidates:
-            city_name = self._clean_destination_name(candidate.get("city"))
-
-            if not city_name:
-                continue
-
-            geo_data = self._geocode_location(city_name)
-
-            if not geo_data:
-                continue
-
-            validated.append(
-                {
-                    "destination": city_name,
-                    "state_or_region": region,
-                    "country": geo_data.get("country"),
-                    "formatted_address": geo_data.get("formatted"),
-                    "latitude": geo_data.get("lat"),
-                    "longitude": geo_data.get("lon"),
-                    "match_score": candidate.get("match_score"),
-                    "best_for": candidate.get("best_for", []),
-                    "reason": candidate.get("reason"),
-                    "ideal_days": candidate.get("ideal_days"),
-                    "budget_fit": candidate.get("budget_fit"),
-                }
-            )
-
-        if not validated:
-            return {
-                "success": False,
-                "error": f"City candidates for '{region}' could not be validated using Geoapify.",
-                "region": region,
-                "recommendations": [],
-            }
-
-        return {
-            "success": True,
-            "region": region,
-            "interests": interests,
-            "days": days,
-            "budget": budget,
-            "travelers": travelers,
-            "recommendations": validated[:limit],
+        interest_category_map = {
+            "heritage": [
+                "tourism.sights",
+                "tourism.attraction",
+                "entertainment.museum",
+            ],
+            "religious": [
+                "religion",
+                "tourism.sights",
+            ],
+            "nature": [
+                "natural",
+                "natural.water",
+                "natural.forest",
+                "natural.mountain",
+                "leisure.park",
+            ],
+            "beach": [
+                "natural.beach",
+                "natural.water",
+                "tourism.attraction",
+            ],
+            "adventure": [
+                "natural",
+                "sport",
+                "tourism.attraction",
+            ],
+            "shopping": [
+                "tourism.sights",
+            ],
+            "food": [
+                "tourism.sights",
+                "tourism.attraction",
+            ],
+            "nightlife": [
+                "tourism.sights",
+                "tourism.attraction",
+            ],
+            "relaxation": [
+                "natural",
+                "leisure.park",
+                "tourism.attraction",
+            ],
+            "romantic": [
+                "natural",
+                "natural.water",
+                "tourism.attraction",
+                "tourism.sights",
+            ],
         }
 
-    def _generate_city_candidates(
+        categories = list(base_categories)
+
+        for interest in interests:
+            categories.extend(interest_category_map.get(str(interest).lower(), []))
+
+        seen = set()
+        unique_categories = []
+
+        for category in categories:
+            if category not in seen:
+                seen.add(category)
+                unique_categories.append(category)
+
+        return unique_categories
+
+    def _fetch_geoapify_places(
         self,
-        region: str,
-        interests: List[str],
-        days: Optional[int],
-        budget: Optional[str],
-        travelers: Optional[int],
-        travel_style: Optional[str],
+        latitude: Optional[float],
+        longitude: Optional[float],
+        categories: List[str],
         limit: int,
     ) -> List[Dict[str, Any]]:
+        if not self.geoapify_api_key:
+            return []
+
+        if latitude is None or longitude is None:
+            return []
+
+        params = {
+            "categories": ",".join(categories),
+            "filter": f"circle:{longitude},{latitude},25000",
+            "bias": f"proximity:{longitude},{latitude}",
+            "limit": limit,
+            "apiKey": self.geoapify_api_key,
+        }
+
+        try:
+            response = requests.get(
+                self.geoapify_places_url,
+                params=params,
+                timeout=self.timeout,
+                verify=self.ssl_verify,
+            )
+            response.raise_for_status()
+
+            data = response.json()
+            places = []
+
+            for feature in data.get("features", []):
+                properties = feature.get("properties", {})
+                geometry = feature.get("geometry", {})
+                coordinates = geometry.get("coordinates", [])
+
+                lon = None
+                lat = None
+
+                if len(coordinates) >= 2:
+                    lon = coordinates[0]
+                    lat = coordinates[1]
+
+                name = (
+                    properties.get("name")
+                    or properties.get("address_line1")
+                    or properties.get("formatted")
+                )
+
+                if not name:
+                    continue
+
+                places.append(
+                    {
+                        "name": self._clean_text(name),
+                        "categories": properties.get("categories", []),
+                        "formatted_address": self._clean_text(properties.get("formatted")),
+                        "latitude": lat,
+                        "longitude": lon,
+                        "distance_meters": properties.get("distance"),
+                        "place_id": properties.get("place_id"),
+                        "source": "geoapify_places",
+                    }
+                )
+
+            return places
+
+        except Exception as e:
+            print("[PlacesService] Geoapify places lookup failed:")
+            print(type(e).__name__, str(e))
+            return []
+
+    def _filter_usable_attractions(self, places: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not places:
+            return []
+
+        filtered = []
+        seen_names = set()
+
+        for place in places:
+            if not isinstance(place, dict):
+                continue
+
+            name = self._clean_text(place.get("name"))
+
+            if not name:
+                continue
+
+            normalized_name = name.lower().strip()
+
+            if normalized_name in seen_names:
+                continue
+
+            if self._looks_like_blocked_poi_name(normalized_name):
+                continue
+
+            categories = (
+                place.get("categories")
+                or place.get("category")
+                or place.get("kinds")
+                or []
+            )
+
+            if isinstance(categories, str):
+                categories = [categories]
+
+            category_text = " ".join(str(category).lower() for category in categories)
+
+            if self._has_blocked_poi_category(category_text):
+                continue
+
+            if not self._has_strong_attraction_category(category_text):
+                continue
+
+            cleaned_place = {
+                "name": name,
+                "categories": categories,
+                "formatted_address": self._clean_text(place.get("formatted_address")),
+                "latitude": place.get("latitude"),
+                "longitude": place.get("longitude"),
+                "distance_meters": place.get("distance_meters"),
+                "place_id": place.get("place_id"),
+                "source": place.get("source") or "geoapify",
+            }
+
+            filtered.append(cleaned_place)
+            seen_names.add(normalized_name)
+
+        return filtered
+
+    # ------------------------------------------------------------------ #
+    # Landmark fallback: Gemini candidates + Geoapify validation
+    # ------------------------------------------------------------------ #
+
+    def _generate_landmark_candidates(
+        self,
+        city: str,
+        interests: Optional[List[str]],
+        limit: int = 8,
+    ) -> List[Dict[str, Any]]:
+        interests = interests or []
+
+        if not self.gemini_model:
+            return []
+
         prompt = f"""
-You are a travel destination recommendation engine for India-focused trip planning.
+You are a canonical attraction candidate generator for an Indian travel planning system.
 
 Return only valid JSON.
 Do not include markdown.
 Do not explain anything.
 
-The user wants to visit this broad state/region/country: {region}
-
-User trip preferences:
-- interests: {interests}
-- days available: {days}
-- budget: {budget}
-- travelers: {travelers}
-- travel style: {travel_style}
-
 Task:
-Recommend the best specific cities or towns to visit WITHIN "{region}" — do not
-recommend places outside this state/region/country.
+List well-known sightseeing attractions for the given Indian city.
 
 Rules:
-1. Only recommend real, well-known tourist cities/towns located inside "{region}".
-2. Match interests such as beach, nature, food, nightlife, heritage, religious, adventure, shopping, relaxation, romantic.
-3. Consider the number of days available: recommend fewer cities for shorter trips.
-4. Consider budget fit and travel style.
-5. Do not invent non-existent places.
-6. match_score must be between 0 and 100.
-7. Return at most {limit} cities.
-8. City names should be clean city/town names only.
+1. Return only attractions/landmarks suitable for a travel itinerary.
+2. Do not return restaurants, cafes, hotels, roads, streets, shops, bookstores, offices, banks, or generic markets.
+3. Prefer forts, palaces, temples, museums, lakes, gardens, viewpoints, monuments, heritage sites, and nature spots.
+4. Do not invent obscure or fake places.
+5. Keep names concise and searchable.
+6. Match user interests where possible.
+7. Return at most {limit} candidates.
 
-Return JSON exactly in this structure:
+City:
+{city}
+
+User interests:
+{json.dumps(interests, ensure_ascii=False)}
+
+Return JSON exactly in this format:
 {{
-  "cities": [
+  "candidates": [
     {{
-      "city": "City Name",
-      "match_score": 90,
-      "best_for": ["heritage", "food"],
-      "reason": "Short explanation of why this city matches.",
-      "ideal_days": "2-3 days",
-      "budget_fit": "low|medium|high|low-medium|medium-high"
+      "name": "Attraction Name",
+      "type": "fort|palace|museum|lake|temple|garden|viewpoint|monument|heritage|nature|other",
+      "reason": "short reason"
     }}
   ]
 }}
@@ -5378,29 +7258,203 @@ Return JSON exactly in this structure:
             response = self.gemini_model.generate_content(
                 prompt,
                 generation_config={
-                    "temperature": 0.2,
+                    "temperature": 0.15,
                     "top_p": 0.8,
                     "top_k": 40,
                 },
             )
 
             text = getattr(response, "text", "").strip()
-
-            if not text:
-                return []
-
             data = json.loads(self._extract_json(text))
-            cities = data.get("cities", [])
 
-            if not isinstance(cities, list):
-                return []
+            candidates = data.get("candidates", [])
+            cleaned = []
 
-            return cities[:limit]
+            for item in candidates:
+                if not isinstance(item, dict):
+                    continue
+
+                name = self._clean_text(item.get("name"))
+                if not name:
+                    continue
+
+                normalized_name = name.lower()
+                if self._looks_like_blocked_poi_name(normalized_name):
+                    continue
+
+                cleaned.append(
+                    {
+                        "name": name,
+                        "type": self._clean_text(item.get("type")) or "attraction",
+                        "reason": self._clean_text(item.get("reason")),
+                        "source": "gemini_landmark_candidate",
+                    }
+                )
+
+                if len(cleaned) >= limit:
+                    break
+
+            return cleaned
 
         except Exception as e:
-            print("[PlacesService] Gemini city recommendation failed:")
+            print("[PlacesService] Landmark candidate generation failed:")
             print(type(e).__name__, str(e))
             return []
+
+    def _validate_landmark_candidates(
+    self,
+    city: str,
+    city_location: Dict[str, Any],
+    candidates: List[Dict[str, Any]],
+    limit: int,
+) -> List[Dict[str, Any]]:
+        if not candidates:
+            return []
+    
+        validated = []
+        seen_names = set()
+    
+        city_name = self._clean_text(city)
+        city_name_lower = city_name.lower() if city_name else ""
+    
+        city_lat = city_location.get("latitude")
+        city_lon = city_location.get("longitude")
+    
+        for candidate in candidates:
+            name = self._clean_text(candidate.get("name"))
+    
+            if not name:
+                continue
+            
+            normalized_name = name.lower().strip()
+    
+            if normalized_name in seen_names:
+                continue
+            
+            if self._looks_like_blocked_poi_name(normalized_name):
+                continue
+            
+            query = f"{name}, {city}, India"
+            geo_data = self._geocode_location(query)
+    
+            if not geo_data:
+                continue
+            
+            lat = geo_data.get("latitude")
+            lon = geo_data.get("longitude")
+    
+            if lat is None or lon is None:
+                continue
+            
+            resolved_city = self._clean_text(
+                geo_data.get("city")
+                or geo_data.get("town")
+                or geo_data.get("village")
+                or geo_data.get("name")
+            )
+    
+            resolved_city_lower = resolved_city.lower() if resolved_city else ""
+    
+            distance_km = None
+    
+            if city_lat is not None and city_lon is not None:
+                distance_km = self._haversine_km(
+                    lat1=float(city_lat),
+                    lon1=float(city_lon),
+                    lat2=float(lat),
+                    lon2=float(lon),
+                )
+    
+            candidate_type = str(candidate.get("type") or "").lower()
+    
+            # Strict city ownership guard:
+            # If Geoapify clearly resolves this landmark to another selected city/town,
+            # do not attach it to the current city.
+            if resolved_city_lower and city_name_lower:
+                if resolved_city_lower != city_name_lower:
+                    # Allow only broad natural/outing spots within a reasonable excursion radius.
+                    is_excursion_type = any(
+                        term in candidate_type
+                        for term in ["lake", "beach", "nature", "wildlife", "waterfall"]
+                    )
+    
+                    if not is_excursion_type:
+                        continue
+                    
+            # Normal city landmark radius.
+            # This prevents "Konark Sun Temple" from being added to Puri.
+            # Natural excursions get a slightly larger radius.
+            if distance_km is not None:
+                is_excursion_type = any(
+                    term in candidate_type
+                    for term in ["lake", "beach", "nature", "wildlife", "waterfall"]
+                )
+    
+                max_radius_km = 55 if is_excursion_type else 30
+    
+                if distance_km > max_radius_km:
+                    continue
+                
+            validated_place = {
+                "name": name,
+                "categories": [
+                    "tourism.attraction",
+                    "validated_landmark",
+                    str(candidate.get("type") or "attraction"),
+                ],
+                "formatted_address": geo_data.get("formatted"),
+                "latitude": lat,
+                "longitude": lon,
+                "distance_meters": int(distance_km * 1000) if distance_km is not None else None,
+                "place_id": geo_data.get("place_id"),
+                "reason": candidate.get("reason"),
+                "source": "gemini_candidate_geoapify_validated",
+                "resolved_city": resolved_city,
+            }
+    
+            if self._filter_usable_attractions([validated_place]):
+                validated.append(validated_place)
+                seen_names.add(normalized_name)
+    
+            if len(validated) >= limit:
+                break
+            
+        return validated
+    
+    def _merge_places(
+        self,
+        primary: List[Dict[str, Any]],
+        secondary: List[Dict[str, Any]],
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        merged = []
+        seen_names = set()
+
+        for place in list(primary or []) + list(secondary or []):
+            if not isinstance(place, dict):
+                continue
+
+            name = self._clean_text(place.get("name"))
+
+            if not name:
+                continue
+
+            normalized_name = name.lower().strip()
+
+            if normalized_name in seen_names:
+                continue
+
+            merged.append(place)
+            seen_names.add(normalized_name)
+
+            if len(merged) >= limit:
+                break
+
+        return merged
+
+    # ------------------------------------------------------------------ #
+    # Place ranking
+    # ------------------------------------------------------------------ #
 
     def rank_places(
         self,
@@ -5409,66 +7463,69 @@ Return JSON exactly in this structure:
         interests: Optional[List[str]] = None,
         days: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """Rank a single city's attractions using Gemini.
-
-        Attractions are always fetched and ranked per city — never merged
-        across cities — so this must be called once per selected city with
-        that city's own place list.
-        """
         interests = interests or []
+        places = places or []
 
-        if not places:
+        usable_places = self._filter_usable_attractions(places)
+
+        if not usable_places:
             return {
                 "success": True,
                 "city": city,
+                "interests": interests,
+                "days": days,
                 "ranked_places": [],
+                "poi_quality": "weak",
+                "note": (
+                    "No reliable sightseeing POIs were available after filtering. "
+                    "The final composer should create a high-level itinerary without naming raw POIs."
+                ),
             }
 
         if not self.gemini_model:
-            # Ranking is an enhancement, not a hard requirement: degrade
-            # gracefully to the geoapify distance-sorted order instead of
-            # failing the whole attractions step.
             return {
                 "success": True,
                 "city": city,
-                "ranked_places": places,
-                "note": "Gemini unavailable; returned distance-sorted order without ranking.",
+                "interests": interests,
+                "days": days,
+                "ranked_places": usable_places,
+                "poi_quality": "usable" if len(usable_places) >= 3 else "weak",
+                "ranking_method": "filtered_order_without_llm",
             }
-
-        compact_places = [
-            {
-                "name": place.get("name"),
-                "category": place.get("category"),
-                "distance_meters": place.get("distance_meters"),
-            }
-            for place in places
-            if isinstance(place, dict)
-        ]
 
         prompt = f"""
-You are a travel attraction ranking engine.
+You are ranking sightseeing attractions for a travel itinerary.
 
-Return only valid JSON. Do not include markdown. Do not explain anything.
+Return only valid JSON.
+Do not include markdown.
+Do not add new places.
 
-City: {city}
-User interests: {interests}
-Days available in this city: {days}
+Rules:
+1. Use only the provided places.
+2. Rank genuine sightseeing attractions higher.
+3. Prefer places that match the user's interests.
+4. Do not rank restaurants, cafes, hotels, shops, roads, offices, banks, streets, or commercial places.
+5. Do not invent famous attractions missing from the provided list.
 
-Candidate attractions (JSON list):
-{json.dumps(compact_places, ensure_ascii=False)}
+City:
+{city}
 
-Task:
-Rank these attractions from most to least worth visiting for this specific
-city, given the user's interests and days available. Do not add attractions
-that are not in the candidate list. Do not invent attractions.
+Interests:
+{json.dumps(interests, ensure_ascii=False)}
 
-Return JSON exactly in this structure:
+Days:
+{days}
+
+Places:
+{json.dumps(usable_places, indent=2, ensure_ascii=False)}
+
+Return JSON exactly in this format:
 {{
-  "ranked": [
+  "ranked_places": [
     {{
-      "name": "Attraction name from the candidate list",
-      "rank": 1,
-      "reason": "Short reason this attraction is worth visiting."
+      "name": "place name",
+      "reason": "short reason",
+      "priority": 1
     }}
   ]
 }}
@@ -5478,167 +7535,196 @@ Return JSON exactly in this structure:
             response = self.gemini_model.generate_content(
                 prompt,
                 generation_config={
-                    "temperature": 0.2,
+                    "temperature": 0.1,
                     "top_p": 0.8,
                     "top_k": 40,
                 },
             )
 
             text = getattr(response, "text", "").strip()
-
-            if not text:
-                return {
-                    "success": True,
-                    "city": city,
-                    "ranked_places": places,
-                    "note": "Gemini returned empty ranking; using distance-sorted order.",
-                }
-
             data = json.loads(self._extract_json(text))
-            ranked = data.get("ranked", [])
 
-            if not isinstance(ranked, list) or not ranked:
-                return {
-                    "success": True,
-                    "city": city,
-                    "ranked_places": places,
-                    "note": "Gemini ranking was empty; using distance-sorted order.",
-                }
+            ranked_names = [
+                item.get("name")
+                for item in data.get("ranked_places", [])
+                if item.get("name")
+            ]
 
             places_by_name = {
-                place.get("name"): place
-                for place in places
-                if isinstance(place, dict) and place.get("name")
+                str(place.get("name")).lower(): place
+                for place in usable_places
+                if place.get("name")
             }
 
             ranked_places = []
 
-            for entry in ranked:
-                original = places_by_name.get(entry.get("name"))
+            for name in ranked_names:
+                matched = places_by_name.get(str(name).lower())
+                if matched:
+                    ranked_places.append(matched)
 
-                if not original:
-                    continue
+            ranked_existing_names = {
+                str(place.get("name")).lower()
+                for place in ranked_places
+                if place.get("name")
+            }
 
-                ranked_places.append(
-                    {
-                        **original,
-                        "rank": entry.get("rank"),
-                        "rank_reason": entry.get("reason"),
-                    }
-                )
-
-            if not ranked_places:
-                ranked_places = places
+            for place in usable_places:
+                place_name = str(place.get("name")).lower()
+                if place_name not in ranked_existing_names:
+                    ranked_places.append(place)
 
             return {
                 "success": True,
                 "city": city,
+                "interests": interests,
+                "days": days,
                 "ranked_places": ranked_places,
+                "poi_quality": "usable" if len(ranked_places) >= 3 else "weak",
+                "ranking_method": "gemini_filtered_ranking",
             }
 
         except Exception as e:
             print("[PlacesService] Gemini place ranking failed:")
             print(type(e).__name__, str(e))
+
             return {
                 "success": True,
                 "city": city,
-                "ranked_places": places,
-                "note": f"Ranking failed ({type(e).__name__}); using distance-sorted order.",
+                "interests": interests,
+                "days": days,
+                "ranked_places": usable_places,
+                "poi_quality": "usable" if len(usable_places) >= 3 else "weak",
+                "ranking_method": "fallback_filtered_order",
+                "ranking_error": str(e),
             }
 
-    def _generate_destination_candidates(
+    # ------------------------------------------------------------------ #
+    # Recommendation validation helpers
+    # ------------------------------------------------------------------ #
+
+    def _validate_recommendation_candidates(
         self,
-        source: Optional[str],
-        interests: List[str],
-        month: Optional[str],
-        budget: Optional[str],
-        days: Optional[int],
-        travelers: Optional[int],
+        recommendations: List[Dict[str, Any]],
         limit: int,
     ) -> List[Dict[str, Any]]:
-        prompt = f"""
-You are a travel destination recommendation engine for India-focused trip planning.
+        validated = []
+        seen = set()
 
-Return only valid JSON.
-Do not include markdown.
-Do not explain anything.
+        for item in recommendations:
+            if not isinstance(item, dict):
+                continue
 
-User trip preferences:
-- source city: {source}
-- interests: {interests}
-- month: {month}
-- budget: {budget}
-- days: {days}
-- travelers: {travelers}
+            destination = self._clean_text(item.get("destination"))
+            if not destination:
+                continue
 
-Task:
-Recommend suitable Indian travel destinations.
+            normalized_destination = destination.lower()
 
-Rules:
-1. Prefer destinations realistically reachable from the source city.
-2. Match interests such as beach, nature, food, nightlife, heritage, religious, adventure, shopping, relaxation, romantic.
-3. Consider budget fit.
-4. Consider trip duration.
-5. Recommend popular and practical destinations.
-6. Do not recommend obscure or low-tourism places unless user explicitly asks for offbeat places.
-7. Do not invent non-existent destinations.
-8. match_score must be between 0 and 100.
-9. Return at most {limit} destinations.
-10. Destination names should be clean city/place names, not combined labels.
-11. For Andaman, use "Port Blair" as destination.
-12. For Ooty and Coonoor, prefer "Ooty" as destination.
-13. For Coorg, prefer "Madikeri" as destination.
-14. For Alleppey, prefer "Alappuzha" as destination.
+            if normalized_destination in seen:
+                continue
 
-Return JSON exactly in this structure:
-{{
-  "recommendations": [
-    {{
-      "destination": "Destination Name",
-      "state_or_region": "State or Region",
-      "match_score": 90,
-      "best_for": ["nature", "relaxation"],
-      "reason": "Short explanation of why this destination matches.",
-      "ideal_days": "3-5 days",
-      "budget_fit": "low|medium|high|low-medium|medium-high",
-      "travel_note": "Short note about reachability from source."
-    }}
-  ]
-}}
-"""
+            geo_data = self._geocode_location(destination)
 
-        try:
-            response = self.gemini_model.generate_content(
-                prompt,
-                generation_config={
-                    "temperature": 0.2,
-                    "top_p": 0.8,
-                    "top_k": 40,
-                },
+            if not geo_data:
+                continue
+
+            scope = self._fallback_scope_from_geocode(geo_data)
+
+            if scope != SCOPE_CITY:
+                continue
+
+            city = geo_data.get("city") or destination
+            state = geo_data.get("state") or item.get("state")
+
+            validated.append(
+                {
+                    "destination": city,
+                    "state": state,
+                    "reason": self._clean_text(item.get("reason")),
+                    "match_score": item.get("match_score"),
+                    "best_for": item.get("best_for") or [],
+                    "budget_fit": item.get("budget_fit"),
+                    "location": geo_data,
+                }
             )
 
-            text = getattr(response, "text", "").strip()
+            seen.add(normalized_destination)
 
-            if not text:
-                return []
+            if len(validated) >= limit:
+                break
 
-            json_text = self._extract_json(text)
-            data = json.loads(json_text)
+        return validated
 
-            recommendations = data.get("recommendations", [])
+    def _validate_city_candidates_inside_region(
+        self,
+        region: str,
+        recommendations: List[Dict[str, Any]],
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        validated = []
+        seen = set()
+        region_lower = region.lower().strip()
 
-            if not isinstance(recommendations, list):
-                return []
+        for item in recommendations:
+            if not isinstance(item, dict):
+                continue
 
-            return recommendations[:limit]
+            destination = self._clean_text(item.get("destination"))
 
-        except Exception as e:
-            print("[PlacesService] Gemini destination generation failed:")
-            print(type(e).__name__, str(e))
-            return []
+            if not destination:
+                continue
+
+            normalized_destination = destination.lower().strip()
+
+            if normalized_destination == region_lower:
+                continue
+
+            if normalized_destination in seen:
+                continue
+
+            geo_data = self._geocode_location(destination)
+
+            if not geo_data:
+                continue
+
+            scope = self._fallback_scope_from_geocode(geo_data)
+
+            if scope != SCOPE_CITY:
+                continue
+
+            city = geo_data.get("city") or destination
+            state = geo_data.get("state") or item.get("state")
+
+            validated.append(
+                {
+                    "destination": city,
+                    "state": state,
+                    "reason": self._clean_text(item.get("reason")),
+                    "match_score": item.get("match_score"),
+                    "best_for": item.get("best_for") or [],
+                    "location": geo_data,
+                }
+            )
+
+            seen.add(normalized_destination)
+
+            if len(validated) >= limit:
+                break
+
+        return validated
+
+    # ------------------------------------------------------------------ #
+    # Geoapify helpers
+    # ------------------------------------------------------------------ #
 
     def _geocode_location(self, location: str) -> Optional[Dict[str, Any]]:
         if not self.geoapify_api_key:
+            return None
+
+        location = self._clean_text(location)
+
+        if not location:
             return None
 
         params = {
@@ -5655,10 +7741,9 @@ Return JSON exactly in this structure:
                 timeout=self.timeout,
                 verify=self.ssl_verify,
             )
-
             response.raise_for_status()
-            data = response.json()
 
+            data = response.json()
             features = data.get("features", [])
 
             if not features:
@@ -5677,12 +7762,16 @@ Return JSON exactly in this structure:
 
             return {
                 "formatted": properties.get("formatted"),
-                "city": properties.get("city") or properties.get("name"),
+                "name": properties.get("name"),
+                "city": properties.get("city")
+                or properties.get("town")
+                or properties.get("village"),
                 "state": properties.get("state"),
                 "country": properties.get("country"),
-                "lat": lat,
-                "lon": lon,
-                "raw": properties,
+                "result_type": properties.get("result_type"),
+                "latitude": lat,
+                "longitude": lon,
+                "place_id": properties.get("place_id"),
             }
 
         except Exception as e:
@@ -5690,185 +7779,66 @@ Return JSON exactly in this structure:
             print(type(e).__name__, str(e))
             return None
 
-    def _fetch_places_near_location(
+    # ------------------------------------------------------------------ #
+    # POI quality helpers
+    # ------------------------------------------------------------------ #
+
+    def _has_strong_attraction_category(self, category_text: str) -> bool:
+        if not category_text:
+            return False
+
+        return any(term in category_text for term in STRONG_ATTRACTION_CATEGORY_TERMS)
+
+    def _has_blocked_poi_category(self, category_text: str) -> bool:
+        if not category_text:
+            return False
+
+        return any(term in category_text for term in BLOCKED_POI_CATEGORY_TERMS)
+
+    def _looks_like_blocked_poi_name(self, normalized_name: str) -> bool:
+        if not normalized_name:
+            return True
+
+        return any(hint in normalized_name for hint in BLOCKED_POI_NAME_HINTS)
+
+    # ------------------------------------------------------------------ #
+    # Numeric helpers
+    # ------------------------------------------------------------------ #
+
+    def _haversine_km(
         self,
-        lat: float,
-        lon: float,
-        categories: List[str],
-        limit: int,
-    ) -> List[Dict[str, Any]]:
-        if not self.geoapify_api_key:
-            return []
+        lat1: float,
+        lon1: float,
+        lat2: float,
+        lon2: float,
+    ) -> float:
+        import math
 
-        if lat is None or lon is None:
-            return []
+        radius_km = 6371.0
 
-        if not categories:
-            categories = [
-                "tourism.sights",
-                "tourism.attraction",
-                "leisure",
-                "catering.restaurant",
-            ]
+        phi1 = math.radians(lat1)
+        phi2 = math.radians(lat2)
+        delta_phi = math.radians(lat2 - lat1)
+        delta_lambda = math.radians(lon2 - lon1)
 
-        params = {
-            "categories": ",".join(categories),
-            "filter": f"circle:{lon},{lat},25000",
-            "bias": f"proximity:{lon},{lat}",
-            "limit": limit,
-            "apiKey": self.geoapify_api_key,
-        }
+        a = (
+            math.sin(delta_phi / 2) ** 2
+            + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+        )
 
-        try:
-            response = requests.get(
-                self.geoapify_places_url,
-                params=params,
-                timeout=self.timeout,
-                verify=self.ssl_verify,
-            )
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
-            response.raise_for_status()
-            data = response.json()
+        return radius_km * c
 
-            places = []
-
-            for feature in data.get("features", []):
-                properties = feature.get("properties", {})
-                geometry = feature.get("geometry", {})
-                coordinates = geometry.get("coordinates", [])
-
-                place_lon = None
-                place_lat = None
-
-                if len(coordinates) >= 2:
-                    place_lon = coordinates[0]
-                    place_lat = coordinates[1]
-
-                name = (
-                    properties.get("name")
-                    or properties.get("address_line1")
-                    or properties.get("formatted")
-                )
-
-                if not name:
-                    continue
-
-                places.append(
-                    {
-                        "name": name,
-                        "category": properties.get("categories", []),
-                        "formatted_address": properties.get("formatted"),
-                        "latitude": place_lat,
-                        "longitude": place_lon,
-                        "distance_meters": properties.get("distance"),
-                        "place_id": properties.get("place_id"),
-                    }
-                )
-
-            return places[:limit]
-
-        except Exception as e:
-            print("[PlacesService] Geoapify places lookup failed:")
-            print(type(e).__name__, str(e))
-            return []
-
-    def _map_interests_to_geoapify_categories(self, interests: List[str]) -> List:
-        category_map = {
-            "beach": [
-                "beach",
-                "tourism.attraction",
-                "leisure",
-            ],
-            "nature": [
-                "natural",
-                "natural.forest",
-                "tourism.attraction",
-            ],
-            "food": [
-                "catering.restaurant",
-                "catering.cafe",
-                "commercial.food_and_drink",
-            ],
-            "nightlife": [
-                "entertainment",
-                "catering.bar",
-                "catering.pub",
-            ],
-            "heritage": [
-                "heritage",
-                "tourism.sights",
-                "tourism.museum",
-                "building.historic",
-            ],
-            "religious": [
-                "religion",
-                "building.place_of_worship",
-            ],
-            "adventure": [
-                "sport",
-                "tourism.attraction",
-                "leisure",
-            ],
-            "shopping": [
-                "commercial",
-                "commercial.shopping_mall",
-                "commercial.marketplace",
-            ],
-            "relaxation": [
-                "leisure",
-                "tourism.attraction",
-                "natural",
-            ],
-            "romantic": [
-                "tourism.attraction",
-                "leisure",
-                "natural",
-            ],
-        }
-
-        categories = []
-
-        for interest in interests:
-            mapped = category_map.get(interest, [])
-            categories.extend(mapped)
-
-        if not categories:
-            categories = [
-                "tourism.sights",
-                "tourism.attraction",
-                "leisure",
-                "catering.restaurant",
-            ]
-
-        unique_categories = []
-
-        for category in categories:
-            if category not in unique_categories:
-                unique_categories.append(category)
-
-        return unique_categories
-
-    def _clean_destination_name(self, destination: Optional[str]) -> Optional:
-        if not destination:
-            return None
-
-        destination = html.unescape(destination).strip()
-
-        cleanup_map = {
-            "Alleppey (Alappuzha)": "Alappuzha",
-            "Coorg (Madikeri)": "Madikeri",
-            "Ooty & Coonoor": "Ooty",
-            "Andaman & Nicobar Islands": "Port Blair",
-        }
-
-        return cleanup_map.get(destination, destination)
+    # ------------------------------------------------------------------ #
+    # Generic helpers
+    # ------------------------------------------------------------------ #
 
     def _extract_json(self, text: str) -> str:
         text = text.strip()
 
         if text.startswith("```json"):
             text = text.replace("```json", "").replace("```", "").strip()
-
         elif text.startswith("```"):
             text = text.replace("```", "").strip()
 
@@ -5879,6 +7849,19 @@ Return JSON exactly in this structure:
             return text[start:end + 1]
 
         return text
+
+    def _clean_text(self, value: Any) -> Optional:
+        if value is None:
+            return None
+
+        if not isinstance(value, str):
+            value = str(value)
+
+        value = html.unescape(value)
+        value = " ".join(value.split())
+        value = value.strip()
+
+        return value or None
 ```
 
 ---
